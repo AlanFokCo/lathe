@@ -13,11 +13,12 @@ import (
 
 // RunPrint runs non-interactive print mode. Returns the process exit code.
 func RunPrint(ctx context.Context, cfg *config.Config) int {
-	eng, err := agent.NewEngine(cfg)
+	eng, err := agent.NewEngine(ctx, cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 1
 	}
+	defer eng.Close()
 	evCh := eng.Run(ctx, cfg.Prompt)
 	switch cfg.Output {
 	case config.OutputStreamJSON:

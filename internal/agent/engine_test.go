@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/mcp"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/skill"
@@ -252,5 +253,43 @@ func TestEngineSkillToolReturnsBody(t *testing.T) {
 	}
 	if !sawResult {
 		t.Fatalf("no Skill ToolResult event in: %+v", evs)
+	}
+}
+
+// mockMCPClient is a minimal mcp.Client for lifecycle tests.
+type mockMCPClient struct {
+	closed bool
+}
+
+func (m *mockMCPClient) ListTools(ctx context.Context) ([]model.ToolSchema, error) {
+	return nil, nil
+}
+func (m *mockMCPClient) CallTool(ctx context.Context, name string, input map[string]any) (*tool.ToolResponse, error) {
+	return nil, nil
+}
+func (m *mockMCPClient) Close() error {
+	m.closed = true
+	return nil
+}
+
+func TestEngineCloseNoClients(t *testing.T) {
+	eng := newEngineForTest(&fakeModel{}, tool.NewToolkit(), bypassEngine(), 10)
+	if err := eng.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
+func TestEngineCloseCallsClients(t *testing.T) {
+	eng := newEngineForTest(&fakeModel{}, tool.NewToolkit(), bypassEngine(), 10)
+	c1, c2 := &mockMCPClient{}, &mockMCPClient{}
+	eng.mcpClients = []mcp.Client{c1, c2}
+	if err := eng.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !c1.closed || !c2.closed {
+		t.Fatal("clients not closed")
+	}
+	if err := eng.Close(); err != nil { // idempotent
+		t.Fatalf("second close: %v", err)
 	}
 }

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,7 +53,7 @@ func TestNewEngineResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "accept_edits", MaxIters: 10, Resume: sess.ID}
-	eng, err := NewEngine(cfg)
+	eng, err := NewEngine(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("newengine: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestNewEngineRegistersSkillToolWhenSkillsExist(t *testing.T) {
 	t.Chdir(work)
 
 	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "accept_edits", MaxIters: 10}
-	eng, err := NewEngine(cfg)
+	eng, err := NewEngine(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestNewEngineNoSkillToolWhenAbsent(t *testing.T) {
 	t.Chdir(work)
 
 	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "accept_edits", MaxIters: 10}
-	eng, err := NewEngine(cfg)
+	eng, err := NewEngine(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

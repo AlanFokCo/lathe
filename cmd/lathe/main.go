@@ -46,7 +46,7 @@ func newRootCmd() *cobra.Command {
 		if prompt != "" {
 			os.Exit(cli.RunPrint(cmd.Context(), cfg))
 		}
-		return tui.Run(cfg)
+		return tui.Run(cmd.Context(), cfg)
 	}
 	return root
 }

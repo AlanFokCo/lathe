@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 
 	agentscope "github.com/alanfokco/agentscope-go/pkg/agentscope"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/mcp"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
@@ -28,12 +30,13 @@ type Engine struct {
 	session     *session.Session
 	interactive bool
 	approvalCh  chan string
+	mcpClients  []mcp.Client
 }
 
 // NewEngine assembles an Engine from a resolved config (production path:
 // builds a real ChatModel for the configured provider). The system prompt is
 // built once at construction (env + tool descriptions + project memory).
-func NewEngine(cfg *config.Config) (*Engine, error) {
+func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	agentscope.Init()
 	cm, err := buildChatModel(cfg)
 	if err != nil {
@@ -144,6 +147,18 @@ func (e *Engine) SubmitApproval(decision string) {
 	default:
 		// no pending approval; drop (TUI state machine prevents stray calls)
 	}
+}
+
+// Close releases engine resources, including MCP client connections. It is
+// idempotent and best-effort (per-client errors are ignored).
+func (e *Engine) Close() error {
+	for _, c := range e.mcpClients {
+		if c != nil {
+			_ = c.Close()
+		}
+	}
+	e.mcpClients = nil
+	return nil
 }
 
 func buildChatModel(cfg *config.Config) (model.ChatModel, error) {
