@@ -66,7 +66,7 @@ func NewEngine(cfg *config.Config) (*Engine, error) {
 	}
 
 	cwd := mustCwd()
-	sysMsg := message.SystemMsg("lathe", buildSystemPrompt(cwd, tk, loadMemoryFiles(cwd)))
+	sysMsg := message.SystemMsg("lathe", buildSystemPrompt(cwd, tk, loadMemoryFiles(cwd), ""))
 	sess, _ := session.New(cwd, cfg.Model) // best-effort; nil on failure → no persistence
 	e := &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
@@ -86,7 +86,7 @@ func newEngineForTest(cm model.ChatModel, tk *tool.Toolkit, eng *permission.Engi
 	return &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: eng,
 		maxIters:    maxIters,
-		conv:        []*message.Msg{message.SystemMsg("lathe", buildSystemPrompt("", tk, ""))},
+		conv:        []*message.Msg{message.SystemMsg("lathe", buildSystemPrompt("", tk, "", ""))},
 		cfg:         &config.Config{Provider: "openai", Model: "test-model", APIKey: "k"},
 		compressCfg: defaultCompressConfig(),
 		approvalCh:  make(chan string, 1),

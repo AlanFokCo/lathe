@@ -11,8 +11,8 @@ import (
 )
 
 // buildSystemPrompt assembles the coding-agent system prompt: base role,
-// environment (OS/cwd/git), tool descriptions, and project memory.
-func buildSystemPrompt(cwd string, tk *tool.Toolkit, memory string) string {
+// environment (OS/cwd/git), tool descriptions, project memory, and skills.
+func buildSystemPrompt(cwd string, tk *tool.Toolkit, memory, skillsSection string) string {
 	var b strings.Builder
 	b.WriteString("You are lathe, an interactive coding agent operating in a terminal.\n")
 	b.WriteString("You help the user with software engineering tasks: reading, writing, and editing code, running commands, and searching the codebase.\n\n")
@@ -33,6 +33,10 @@ func buildSystemPrompt(cwd string, tk *tool.Toolkit, memory string) string {
 		b.WriteString("\n# Project context (CLAUDE.md / AGENTS.md)\n")
 		b.WriteString(memory)
 		b.WriteString("\n")
+	}
+
+	if strings.TrimSpace(skillsSection) != "" {
+		b.WriteString(skillsSection)
 	}
 
 	b.WriteString("\nPrefer targeted edits over full rewrites. Run commands to verify your work. When the task is complete, give a concise summary of what you did.")
