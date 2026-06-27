@@ -15,6 +15,8 @@ var version = "0.1.0"
 func newRootCmd() *cobra.Command {
 	var prompt, provider, model, apiKey, baseURL, permissionMode, output string
 	var maxIters int
+	var resumeID string
+	var doContinue bool
 
 	root := &cobra.Command{
 		Use:     "lathe",
@@ -29,11 +31,14 @@ func newRootCmd() *cobra.Command {
 	root.Flags().StringVar(&permissionMode, "permission", "accept_edits", "default|accept_edits|explore|bypass|dont_ask")
 	root.Flags().StringVar(&output, "output", "text", "text|stream-json")
 	root.Flags().IntVar(&maxIters, "max-iters", 50, "max agent iterations")
+	root.Flags().StringVar(&resumeID, "resume", "", "resume session <id>")
+	root.Flags().BoolVar(&doContinue, "continue", false, "continue most recent session in cwd")
 
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load(config.Flags{
 			Provider: provider, Model: model, APIKey: apiKey, BaseURL: baseURL,
 			Permission: permissionMode, Output: output, MaxIters: maxIters, Prompt: prompt,
+			Resume: resumeID, Continue: doContinue,
 		})
 		if err != nil {
 			return err
