@@ -180,3 +180,19 @@ func TestEngineMultiTurnConversationPersists(t *testing.T) {
 		}
 	}
 }
+
+func TestEngineAutoCompactEmitsEvent(t *testing.T) {
+	m := &compressFakeModel{tokenCount: 200000} // over threshold → auto-compress
+	eng := newEngineForTest(m, tool.NewToolkit(), bypassEngine(), 10)
+	eng.conv = append(eng.conv, message.UserMsg("u", "old1"), message.UserMsg("u", "old2"))
+	evs := drain(eng.Run(context.Background(), "go"))
+	var sawCompacted bool
+	for _, ev := range evs {
+		if _, ok := ev.(event.Compacted); ok {
+			sawCompacted = true
+		}
+	}
+	if !sawCompacted {
+		t.Fatalf("expected Compacted event in: %+v", evs)
+	}
+}

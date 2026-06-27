@@ -45,3 +45,8 @@ func (ReplyEnd) Kind() string { return "reply_end" }
 type ErrorEvent struct{ Err error }
 
 func (ErrorEvent) Kind() string { return "error" }
+
+// Compacted signals the conversation was auto-compressed (before→after tokens).
+type Compacted struct{ Before, After int }
+
+func (Compacted) Kind() string { return "compacted" }

@@ -231,3 +231,16 @@ func (e *Engine) retryCompressWithFewer(ctx context.Context, systemPrompt string
 	}
 	return nil, fmt.Errorf("cannot reduce context below threshold")
 }
+
+// CompressNow forces a context compression (for /compact), regardless of
+// threshold. Returns a human-readable message.
+func (e *Engine) CompressNow(ctx context.Context) (string, error) {
+	compacted, before, after, err := e.compressContext(ctx, true)
+	if err != nil {
+		return "", err
+	}
+	if !compacted {
+		return "no compaction needed", nil
+	}
+	return fmt.Sprintf("compressed: %d→%d tokens", before, after), nil
+}

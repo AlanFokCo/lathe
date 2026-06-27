@@ -28,6 +28,12 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 			emitEvent(ctx, ch, event.ReplyEnd{Reason: "cancelled"})
 			return
 		}
+		// auto-compact if the conversation exceeds the context threshold
+		if compacted, before, after, cerr := e.compressContext(ctx, false); cerr != nil {
+			emitEvent(ctx, ch, event.ErrorEvent{Err: cerr})
+		} else if compacted {
+			emitEvent(ctx, ch, event.Compacted{Before: before, After: after})
+		}
 		chunkCh, err := e.chatModel.ChatStream(ctx, e.conv,
 			model.WithTools(tools),
 			model.WithToolChoice(&model.ToolChoice{Mode: "auto"}),
