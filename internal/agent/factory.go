@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 
 	agentscope "github.com/alanfokco/agentscope-go/pkg/agentscope"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/mcp"
@@ -12,6 +13,7 @@ import (
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/skill"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/config"
+	"github.com/alanfokco/lathe/internal/mcpconfig"
 	"github.com/alanfokco/lathe/internal/skills"
 	"github.com/alanfokco/lathe/internal/session"
 )
@@ -54,6 +56,16 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		tk.AddGroup("skills", skill.NewSkillViewerTool(skillsList))
 	}
 
+	// M4b: discover MCP servers from .mcp.json (project + user) and register
+	// their tools. Clients are stored for Close() on shutdown.
+	mcpClients, mcpGroups, mcpWarnings := mcpconfig.Load(ctx, cwd)
+	for _, g := range mcpGroups {
+		tk.AddGroup("mcp:"+g.Name, g.Tools...)
+	}
+	for _, w := range mcpWarnings {
+		fmt.Fprintln(os.Stderr, "mcp:", w)
+	}
+
 	// resume an existing session?
 	if cfg.Resume != "" {
 		sess, conv, err := session.Load(cfg.Resume)
@@ -63,7 +75,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		return &Engine{
 			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
-			conv: conv, session: sess,
+			conv: conv, session: sess, mcpClients: mcpClients,
 		}, nil
 	}
 	if cfg.Continue {
@@ -74,7 +86,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		return &Engine{
 			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
-			conv: conv, session: sess,
+			conv: conv, session: sess, mcpClients: mcpClients,
 		}, nil
 	}
 
@@ -87,7 +99,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	e := &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 		maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
-		session: sess, approvalCh: make(chan string, 1),
+		session: sess, approvalCh: make(chan string, 1), mcpClients: mcpClients,
 	}
 	if sess != nil {
 		_ = sess.SaveMeta()

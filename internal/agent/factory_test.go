@@ -2,6 +2,9 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,5 +115,89 @@ func mustMkdir(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func startMockMCPServer(t *testing.T, toolName string) string {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			JSONRPC string `json:"jsonrpc"`
+			ID      int    `json:"id"`
+			Method  string `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var result any
+		switch req.Method {
+		case "initialize":
+			result = map[string]any{"protocolVersion": "2024-11-05", "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]any{"name": "mock", "version": "1"}}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{"name": toolName, "description": "mock", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{}}}}}
+		default:
+			result = map[string]any{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+	})
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(l)
+	t.Cleanup(func() { _ = srv.Close() })
+	return "http://" + l.Addr().String()
+}
+
+func writeMCPJSONFile(t *testing.T, path string, doc map[string]any) {
+	t.Helper()
+	b, _ := json.Marshal(doc)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNewEngineRegistersMCPTool(t *testing.T) {
+	url := startMockMCPServer(t, "mcpdemo")
+	home := t.TempDir()
+	work := filepath.Join(home, "proj") // under home → project walk / user-level resolve cleanly
+	mustMkdir(t, work)
+	writeMCPJSONFile(t, filepath.Join(work, ".mcp.json"), map[string]any{"mcpServers": map[string]any{"m": map[string]any{"type": "http", "url": url}}})
+	t.Setenv("HOME", home)
+	t.Chdir(work)
+
+	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "bypass", MaxIters: 10}
+	eng, err := NewEngine(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	if eng.toolkit.Get("mcpdemo") == nil {
+		t.Fatal("MCP tool not registered")
+	}
+}
+
+func TestNewEngineNoMCPWhenAbsent(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "proj2")
+	mustMkdir(t, work)
+	t.Setenv("HOME", home)
+	t.Chdir(work)
+
+	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "bypass", MaxIters: 10}
+	eng, err := NewEngine(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	if eng.toolkit.Get("mcpdemo") != nil {
+		t.Fatal("no MCP tool expected when .mcp.json absent")
 	}
 }
