@@ -1,20 +1,25 @@
 // Package tui is lathe's interactive terminal UI: a bubbletea program that
-// consumes the agent.Engine event stream. M2 = pure event-stream consumer.
+// consumes the agent.Engine event stream. M3a adds /model /config slash +
+// a cost status line + EngineControl interface.
 package tui
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
+	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/event"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// EngineRunner is the subset of *agent.Engine the TUI depends on (Run only).
-// Depending on this interface (not the concrete *Engine) keeps the TUI testable
-// with a fake runner — no real engine/terminal needed.
-type EngineRunner interface {
+// EngineControl is the subset of *agent.Engine the TUI depends on.
+type EngineControl interface {
 	Run(ctx context.Context, prompt string) <-chan event.Event
+	SetModel(name string) error
+	ListModels() []string
+	ModelName() string
 }
 
 type modelState int
@@ -25,18 +30,21 @@ const (
 )
 
 type model struct {
-	engine  EngineRunner
+	engine  EngineControl
+	cfg     *config.Config
 	input   textarea.Model
 	sb      scrollback
 	state   modelState
 	ctx     context.Context
 	cancel  context.CancelFunc
 	eventCh <-chan event.Event
+	cumIn   int
+	cumOut  int
 }
 
-func newModel(engine EngineRunner) *model {
+func newModel(engine EngineControl, cfg *config.Config) *model {
 	ta := textarea.New()
-	return &model{engine: engine, input: ta, state: stateIdle}
+	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle}
 }
 
 func (m *model) Init() tea.Cmd { return m.input.Focus() }
@@ -70,7 +78,6 @@ func waitForEvent(ch <-chan event.Event) tea.Cmd {
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		// M2: resize-safe no-op; full width/height wiring is a later refinement.
 		return m, nil
 	case tea.KeyMsg:
 		switch {
@@ -93,7 +100,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			return m, m.submit(text)
 		}
-		// default: forward to the textarea
 		var c tea.Cmd
 		m.input, c = m.input.Update(msg)
 		return m, c
@@ -123,13 +129,15 @@ func (m *model) handleEvent(ev event.Event) {
 		m.sb.finishTool(e.ID, e.Output, e.State, e.Diff)
 	case event.Usage:
 		m.sb.appendUsage(e)
+		m.cumIn += e.InputTokens
+		m.cumOut += e.OutputTokens
 	case event.ErrorEvent:
 		m.sb.appendError(e.Err)
 	}
 }
 
-// maybeSlash handles /help /clear /quit. Returns (cmd, true) if input was a
-// slash command.
+// maybeSlash handles /help /clear /quit /model /config. Returns (cmd, true) if
+// input was a slash command.
 func (m *model) maybeSlash(input string) (tea.Cmd, bool) {
 	cmd, rest, ok := parseSlash(input)
 	if !ok {
@@ -142,7 +150,13 @@ func (m *model) maybeSlash(input string) (tea.Cmd, bool) {
 		m.sb.clear()
 		return nil, true
 	case "help":
-		m.sb.appendUser("/help: commands: /help /clear /quit")
+		m.sb.appendUser("/help: commands: /help /clear /quit /model [name] /config")
+		return nil, true
+	case "model":
+		m.handleModel(rest)
+		return nil, true
+	case "config":
+		m.sb.appendUser(configString(m.cfg))
 		return nil, true
 	default:
 		m.sb.appendUser("unknown command: /" + cmd + " " + rest)
@@ -150,6 +164,42 @@ func (m *model) maybeSlash(input string) (tea.Cmd, bool) {
 	}
 }
 
+func (m *model) handleModel(rest string) {
+	if rest == "" {
+		cur := m.engine.ModelName()
+		var b strings.Builder
+		b.WriteString("/model: current=" + cur + "\n")
+		for _, name := range m.engine.ListModels() {
+			mark := "  "
+			if name == cur {
+				mark = "* "
+			}
+			b.WriteString(mark + name + "\n")
+		}
+		m.sb.appendUser(b.String())
+		return
+	}
+	if err := m.engine.SetModel(rest); err != nil {
+		m.sb.appendUser("/model " + rest + ": " + err.Error())
+		return
+	}
+	m.sb.appendUser("/model: switched to " + rest)
+}
+
+func configString(cfg *config.Config) string {
+	return fmt.Sprintf("provider=%s\nmodel=%s\npermission=%s\nmax-iters=%d\nbase-url=%s\napi-key=%s",
+		cfg.Provider, cfg.Model, cfg.Permission, cfg.MaxIters, cfg.BaseURL, redactKey(cfg.APIKey))
+}
+
+func redactKey(k string) string {
+	if len(k) <= 4 {
+		return strings.Repeat("*", len(k))
+	}
+	return k[:4] + "…"
+}
+
 func (m *model) View() string {
-	return m.sb.render(80) + "\n" + m.input.View()
+	status := fmt.Sprintf("model=%s | perm=%s | tokens in=%d out=%d",
+		m.engine.ModelName(), m.cfg.Permission, m.cumIn, m.cumOut)
+	return m.sb.render(80) + "\n" + status + "\n" + m.input.View()
 }

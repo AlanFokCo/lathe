@@ -12,7 +12,7 @@ func Run(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	m := newModel(eng)
+	m := newModel(eng, cfg)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
 	return err
