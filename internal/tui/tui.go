@@ -20,6 +20,7 @@ type EngineControl interface {
 	SetModel(name string) error
 	ListModels() []string
 	ModelName() string
+	CompressNow(ctx context.Context) (string, error)
 }
 
 type modelState int
@@ -133,6 +134,8 @@ func (m *model) handleEvent(ev event.Event) {
 		m.cumOut += e.OutputTokens
 	case event.ErrorEvent:
 		m.sb.appendError(e.Err)
+	case event.Compacted:
+		m.sb.appendUser(fmt.Sprintf("context compressed: %d→%d tokens", e.Before, e.After))
 	}
 }
 
@@ -150,7 +153,15 @@ func (m *model) maybeSlash(input string) (tea.Cmd, bool) {
 		m.sb.clear()
 		return nil, true
 	case "help":
-		m.sb.appendUser("/help: commands: /help /clear /quit /model [name] /config")
+		m.sb.appendUser("/help: commands: /help /clear /quit /compact /model [name] /config")
+		return nil, true
+	case "compact":
+		msg, err := m.engine.CompressNow(context.Background())
+		if err != nil {
+			m.sb.appendUser("/compact: " + err.Error())
+		} else {
+			m.sb.appendUser("/compact: " + msg)
+		}
 		return nil, true
 	case "model":
 		m.handleModel(rest)

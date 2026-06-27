@@ -27,14 +27,19 @@ func (f *fakeRunner) Run(ctx context.Context, prompt string) <-chan event.Event 
 
 type fakeControl struct {
 	fakeRunner
-	model  string
-	models []string
-	sets   []string
+	model         string
+	models        []string
+	sets          []string
+	compressCalls int
 }
 
 func (f *fakeControl) SetModel(name string) error { f.sets = append(f.sets, name); f.model = name; return nil }
 func (f *fakeControl) ListModels() []string       { return f.models }
 func (f *fakeControl) ModelName() string          { return f.model }
+func (f *fakeControl) CompressNow(ctx context.Context) (string, error) {
+	f.compressCalls++
+	return "compressed: 10→5 tokens", nil
+}
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 
@@ -142,5 +147,26 @@ func pumpModel(t *testing.T, m *model, cmd tea.Cmd) {
 		var c tea.Cmd
 		_, c = m.Update(msg)
 		cmd = c
+	}
+}
+
+func TestModelSlashCompact(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+	m.maybeSlash("/compact")
+	if ctrl.compressCalls != 1 {
+		t.Fatalf("CompressNow calls: %d", ctrl.compressCalls)
+	}
+	if !strings.Contains(m.View(), "compressed") {
+		t.Fatalf("/compact missing feedback:\n%s", m.View())
+	}
+}
+
+func TestModelHandleCompactedEvent(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.handleEvent(event.Compacted{Before: 1000, After: 100})
+	got := m.View()
+	if !strings.Contains(got, "1000") || !strings.Contains(got, "100") {
+		t.Fatalf("scrollback missing compacted tokens:\n%s", got)
 	}
 }
