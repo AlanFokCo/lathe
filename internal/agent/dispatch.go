@@ -21,16 +21,18 @@ func dispatch(
 	calls []message.ToolCallBlock,
 	tk *tool.Toolkit,
 	eng *permission.Engine,
+	interactive bool,
+	approvalCh chan string,
 	emit func(event.Event),
 ) []message.ToolResultBlock {
 	results := make([]message.ToolResultBlock, len(calls))
 	for i, tc := range calls {
-		results[i] = runOneTool(ctx, tc, tk, eng, emit)
+		results[i] = runOneTool(ctx, tc, tk, eng, interactive, approvalCh, emit)
 	}
 	return results
 }
 
-func runOneTool(ctx context.Context, tc message.ToolCallBlock, tk *tool.Toolkit, eng *permission.Engine, emit func(event.Event)) message.ToolResultBlock {
+func runOneTool(ctx context.Context, tc message.ToolCallBlock, tk *tool.Toolkit, eng *permission.Engine, interactive bool, approvalCh chan string, emit func(event.Event)) message.ToolResultBlock {
 	t := tk.Get(tc.Name)
 	emit(event.ToolCallStart{ID: tc.ID, Name: tc.Name, Input: tc.Input})
 
@@ -54,10 +56,31 @@ func runOneTool(ctx context.Context, tc message.ToolCallBlock, tk *tool.Toolkit,
 			return tr
 		}
 		switch decision.Behavior {
-		case permission.BehaviorDeny, permission.BehaviorAsk:
+		case permission.BehaviorDeny:
 			tr := deniedResult(tc, decision.Message)
 			emit(toolResultEvent(tc, tr, ""))
 			return tr
+		case permission.BehaviorAsk:
+			if !interactive {
+				tr := deniedResult(tc, decision.Message)
+				emit(toolResultEvent(tc, tr, ""))
+				return tr
+			}
+			emit(event.RequireApproval{ID: tc.ID, ToolName: tc.Name, Input: tc.Input})
+			d := "deny"
+			select {
+			case d = <-approvalCh:
+			case <-ctx.Done():
+			}
+			if d == "always" {
+				eng.AddRule(permission.Rule{ToolName: tc.Name, Behavior: permission.BehaviorAllow, Source: "user"})
+			}
+			if d != "allow" && d != "always" {
+				tr := deniedResult(tc, "denied by user")
+				emit(toolResultEvent(tc, tr, ""))
+				return tr
+			}
+			// allow/always → fall through to execute
 		}
 	}
 

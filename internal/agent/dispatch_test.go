@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
@@ -35,7 +36,7 @@ func TestDispatchBypassExecutes(t *testing.T) {
 
 	results := dispatch(context.Background(),
 		[]message.ToolCallBlock{toolCallBlock("t1", "echo", `{"msg":"hi"}`)},
-		tk, eng, emit)
+		tk, eng, false, nil, emit)
 
 	if len(results) != 1 || results[0].ID != "t1" || results[0].State != message.ToolResultSuccess {
 		t.Fatalf("result: %+v", results)
@@ -59,7 +60,7 @@ func TestDispatchExploreDeniesNonReadOnly(t *testing.T) {
 
 	results := dispatch(context.Background(),
 		[]message.ToolCallBlock{toolCallBlock("t1", "echo", `{"msg":"hi"}`)},
-		tk, eng, emit)
+		tk, eng, false, nil, emit)
 
 	if results[0].State != message.ToolResultDenied {
 		t.Fatalf("expected denied, got %s", results[0].State)
@@ -72,8 +73,93 @@ func TestDispatchUnknownTool(t *testing.T) {
 	emit, _ := collect()
 	results := dispatch(context.Background(),
 		[]message.ToolCallBlock{toolCallBlock("t1", "nope", `{}`)},
-		tk, eng, emit)
+		tk, eng, false, nil, emit)
 	if results[0].State != message.ToolResultError {
 		t.Fatalf("expected error, got %s", results[0].State)
+	}
+}
+
+func TestDispatchInteractiveAllow(t *testing.T) {
+	tk := tool.NewToolkit(echoTool())
+	eng := permission.NewEngine(permission.NewContext(permission.ModeDefault))
+	approvalCh := make(chan string, 1)
+	var mu sync.Mutex
+	var evs []event.Event
+	emit := func(e event.Event) {
+		mu.Lock()
+		evs = append(evs, e)
+		mu.Unlock()
+		if _, ok := e.(event.RequireApproval); ok {
+			approvalCh <- "allow"
+		}
+	}
+	results := dispatch(context.Background(),
+		[]message.ToolCallBlock{toolCallBlock("t1", "echo", `{"msg":"hi"}`)},
+		tk, eng, true, approvalCh, emit)
+	if results[0].State != message.ToolResultSuccess {
+		t.Fatalf("expected success after allow: %s", results[0].State)
+	}
+}
+
+func TestDispatchInteractiveDeny(t *testing.T) {
+	tk := tool.NewToolkit(echoTool())
+	eng := permission.NewEngine(permission.NewContext(permission.ModeDefault))
+	approvalCh := make(chan string, 1)
+	emit := func(e event.Event) {
+		if _, ok := e.(event.RequireApproval); ok {
+			approvalCh <- "deny"
+		}
+	}
+	results := dispatch(context.Background(),
+		[]message.ToolCallBlock{toolCallBlock("t1", "echo", `{"msg":"hi"}`)},
+		tk, eng, true, approvalCh, emit)
+	if results[0].State != message.ToolResultDenied {
+		t.Fatalf("expected denied: %s", results[0].State)
+	}
+}
+
+func TestDispatchInteractiveAlwaysAddsRule(t *testing.T) {
+	tk := tool.NewToolkit(echoTool())
+	eng := permission.NewEngine(permission.NewContext(permission.ModeDefault))
+	approvalCh := make(chan string, 1)
+	emit := func(e event.Event) {
+		if _, ok := e.(event.RequireApproval); ok {
+			approvalCh <- "always"
+		}
+	}
+	r1 := dispatch(context.Background(),
+		[]message.ToolCallBlock{toolCallBlock("t1", "echo", `{"msg":"hi"}`)},
+		tk, eng, true, approvalCh, emit)
+	if r1[0].State != message.ToolResultSuccess {
+		t.Fatalf("first call state: %s", r1[0].State)
+	}
+	var sawRequire bool
+	emit2 := func(e event.Event) {
+		if _, ok := e.(event.RequireApproval); ok {
+			sawRequire = true
+		}
+	}
+	r2 := dispatch(context.Background(),
+		[]message.ToolCallBlock{toolCallBlock("t2", "echo", `{"msg":"yo"}`)},
+		tk, eng, true, make(chan string, 1), emit2)
+	if r2[0].State != message.ToolResultSuccess {
+		t.Fatalf("second call state: %s", r2[0].State)
+	}
+	if sawRequire {
+		t.Fatal("second call should not ask (always rule added)")
+	}
+}
+
+func TestDispatchInteractiveCtxCancel(t *testing.T) {
+	tk := tool.NewToolkit(echoTool())
+	eng := permission.NewEngine(permission.NewContext(permission.ModeDefault))
+	approvalCh := make(chan string, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	results := dispatch(ctx,
+		[]message.ToolCallBlock{toolCallBlock("t1", "echo", `{"msg":"hi"}`)},
+		tk, eng, true, approvalCh, func(event.Event) {})
+	if results[0].State != message.ToolResultDenied {
+		t.Fatalf("expected denied on ctx cancel: %s", results[0].State)
 	}
 }

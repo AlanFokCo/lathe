@@ -70,7 +70,7 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 			return
 		}
 
-		results := dispatch(ctx, toolCalls, e.toolkit, e.permEng,
+		results := dispatch(ctx, toolCalls, e.toolkit, e.permEng, e.interactive, e.approvalCh,
 			func(ev event.Event) { emitEvent(ctx, ch, ev) })
 		// tool results go in an assistant-role message (agentscope-go convention;
 		// formatters translate to each provider's wire format).

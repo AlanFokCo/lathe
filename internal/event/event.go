@@ -50,3 +50,11 @@ func (ErrorEvent) Kind() string { return "error" }
 type Compacted struct{ Before, After int }
 
 func (Compacted) Kind() string { return "compacted" }
+
+// RequireApproval signals the engine paused on a permission "ask" and needs
+// the user to approve (allow/deny/always). Consumed by the TUI (M3d).
+type RequireApproval struct {
+	ID, ToolName, Input string
+}
+
+func (RequireApproval) Kind() string { return "require_approval" }

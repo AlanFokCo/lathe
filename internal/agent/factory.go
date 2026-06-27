@@ -24,6 +24,8 @@ type Engine struct {
 	cfg         *config.Config
 	compressCfg compressConfig
 	session     *session.Session
+	interactive bool
+	approvalCh  chan string
 }
 
 // NewEngine assembles an Engine from a resolved config (production path:
@@ -69,7 +71,7 @@ func NewEngine(cfg *config.Config) (*Engine, error) {
 	e := &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 		maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
-		session: sess,
+		session: sess, approvalCh: make(chan string, 1),
 	}
 	if sess != nil {
 		_ = sess.SaveMeta()
@@ -87,6 +89,7 @@ func newEngineForTest(cm model.ChatModel, tk *tool.Toolkit, eng *permission.Engi
 		conv:        []*message.Msg{message.SystemMsg("lathe", buildSystemPrompt("", tk, ""))},
 		cfg:         &config.Config{Provider: "openai", Model: "test-model", APIKey: "k"},
 		compressCfg: defaultCompressConfig(),
+		approvalCh:  make(chan string, 1),
 	}
 }
 
@@ -116,6 +119,19 @@ func (e *Engine) ListModels() []string {
 
 // ModelName returns the current model name.
 func (e *Engine) ModelName() string { return e.cfg.Model }
+
+// SetInteractive enables (TUI) or disables (print) interactive approval.
+func (e *Engine) SetInteractive(b bool) { e.interactive = b }
+
+// SubmitApproval delivers the user's approval decision ("allow"/"deny"/"always")
+// to unblock a paused dispatch. Called by the TUI after a RequireApproval event.
+func (e *Engine) SubmitApproval(decision string) {
+	select {
+	case e.approvalCh <- decision:
+	default:
+		// no pending approval; drop (TUI state machine prevents stray calls)
+	}
+}
 
 func buildChatModel(cfg *config.Config) (model.ChatModel, error) {
 	switch cfg.Provider {
