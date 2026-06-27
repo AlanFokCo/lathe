@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
 )
 
 // compressConfig controls when/how lathe compresses its conversation. Defaults
@@ -89,4 +90,80 @@ func copyMsgs(msgs []*message.Msg) []*message.Msg {
 	out := make([]*message.Msg, len(msgs))
 	copy(out, msgs)
 	return out
+}
+
+// TokenCounter is the subset of model.ChatModel needed for token counting.
+type TokenCounter interface {
+	CountTokens(msgs []*message.Msg, tools []model.ToolSchema) int
+}
+
+// splitContextForCompression splits conv (system at [0]) into (toCompress, toReserve)
+// over conv[1:]. It walks backward, accumulating the reserve until the token budget
+// is reached, keeping tool_call/result pairs together (via adjustSplitForToolPairs).
+func splitContextForCompression(conv []*message.Msg, reserveBudget int, counter TokenCounter, tools []model.ToolSchema) (toCompress, toReserve []*message.Msg) {
+	if len(conv) <= 1 {
+		return nil, nil
+	}
+	ctxMsgs := conv[1:]
+	systemMsg := conv[0]
+	baseMsgs := []*message.Msg{systemMsg}
+
+	if reserveBudget <= 0 {
+		return copyMsgs(ctxMsgs), nil
+	}
+	splitIdx := len(ctxMsgs)
+	for i := len(ctxMsgs) - 1; i >= 0; i-- {
+		candidate := make([]*message.Msg, len(baseMsgs))
+		copy(candidate, baseMsgs)
+		candidate = append(candidate, ctxMsgs[i:]...)
+		tokens := counter.CountTokens(candidate, tools)
+		if tokens >= reserveBudget {
+			splitIdx = i + 1
+			break
+		}
+		if i == 0 {
+			return nil, copyMsgs(ctxMsgs) // everything fits in reserve
+		}
+	}
+	if splitIdx >= len(ctxMsgs) {
+		splitIdx = adjustSplitForToolPairs(ctxMsgs, len(ctxMsgs) - 1)
+	} else {
+		splitIdx = adjustSplitForToolPairs(ctxMsgs, splitIdx)
+	}
+	if splitIdx < 0 {
+		splitIdx = 0
+	}
+	if splitIdx > len(ctxMsgs) {
+		splitIdx = len(ctxMsgs)
+	}
+	return copyMsgs(ctxMsgs[:splitIdx]), copyMsgs(ctxMsgs[splitIdx:])
+}
+
+// adjustSplitForToolPairs pushes the split forward so a tool_result whose
+// tool_call is in the compressed portion also moves to the compressed portion.
+func adjustSplitForToolPairs(msgs []*message.Msg, splitIdx int) int {
+	callIDs := make(map[string]bool)
+	resultPositions := make(map[string]int)
+	for i := splitIdx; i < len(msgs); i++ {
+		for _, b := range msgs[i].GetContentBlocks(message.ContentBlockToolCall) {
+			if tc, ok := b.(message.ToolCallBlock); ok {
+				callIDs[tc.ID] = true
+			}
+		}
+		for _, b := range msgs[i].GetContentBlocks(message.ContentBlockToolResult) {
+			if tr, ok := b.(message.ToolResultBlock); ok {
+				resultPositions[tr.ID] = i
+			}
+		}
+	}
+	maxOrphanIdx := -1
+	for id, pos := range resultPositions {
+		if !callIDs[id] && pos > maxOrphanIdx {
+			maxOrphanIdx = pos
+		}
+	}
+	if maxOrphanIdx < 0 {
+		return splitIdx
+	}
+	return maxOrphanIdx + 1
 }
