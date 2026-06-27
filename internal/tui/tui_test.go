@@ -31,6 +31,7 @@ type fakeControl struct {
 	models        []string
 	sets          []string
 	compressCalls int
+	approvalCalls []string
 }
 
 func (f *fakeControl) SetModel(name string) error { f.sets = append(f.sets, name); f.model = name; return nil }
@@ -39,6 +40,9 @@ func (f *fakeControl) ModelName() string          { return f.model }
 func (f *fakeControl) CompressNow(ctx context.Context) (string, error) {
 	f.compressCalls++
 	return "compressed: 10→5 tokens", nil
+}
+func (f *fakeControl) SubmitApproval(decision string) {
+	f.approvalCalls = append(f.approvalCalls, decision)
 }
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
@@ -168,5 +172,50 @@ func TestModelHandleCompactedEvent(t *testing.T) {
 	got := m.View()
 	if !strings.Contains(got, "1000") || !strings.Contains(got, "100") {
 		t.Fatalf("scrollback missing compacted tokens:\n%s", got)
+	}
+}
+
+func TestModelRequireApprovalShowsModal(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.handleEvent(event.RequireApproval{ID: "t1", ToolName: "Bash", Input: `{"command":"ls"}`})
+	if m.state != stateAwaitingApproval {
+		t.Fatalf("state: %v", m.state)
+	}
+	got := m.View()
+	if !strings.Contains(got, "Bash") || !strings.Contains(got, "[y]") || !strings.Contains(got, "[n]") || !strings.Contains(got, "[a]") {
+		t.Fatalf("modal missing content:\n%s", got)
+	}
+}
+
+func TestModelApprovalKeys(t *testing.T) {
+	cases := []struct {
+		key  byte
+		want string
+	}{
+		{'y', "allow"},
+		{'n', "deny"},
+		{'a', "always"},
+	}
+	for _, c := range cases {
+		ctrl := &fakeControl{model: "gpt-4o"}
+		m := newModel(ctrl, testCfg())
+		m.handleEvent(event.RequireApproval{ID: "t1", ToolName: "Bash", Input: `{}`})
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{rune(c.key)}})
+		if len(ctrl.approvalCalls) != 1 || ctrl.approvalCalls[0] != c.want {
+			t.Fatalf("key %c: got %v want %q", c.key, ctrl.approvalCalls, c.want)
+		}
+		if m.state != stateRunning {
+			t.Fatalf("state after key: %v", m.state)
+		}
+	}
+}
+
+func TestModelApprovalESC(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+	m.handleEvent(event.RequireApproval{ID: "t1", ToolName: "Bash", Input: `{}`})
+	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	if len(ctrl.approvalCalls) != 1 || ctrl.approvalCalls[0] != "deny" {
+		t.Fatalf("ESC: got %v want deny", ctrl.approvalCalls)
 	}
 }

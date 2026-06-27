@@ -12,6 +12,7 @@ func Run(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
+	eng.SetInteractive(true)
 	m := newModel(eng, cfg)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()

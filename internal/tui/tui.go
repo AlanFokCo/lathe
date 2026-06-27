@@ -21,6 +21,7 @@ type EngineControl interface {
 	ListModels() []string
 	ModelName() string
 	CompressNow(ctx context.Context) (string, error)
+	SubmitApproval(decision string)
 }
 
 type modelState int
@@ -28,6 +29,7 @@ type modelState int
 const (
 	stateIdle modelState = iota
 	stateRunning
+	stateAwaitingApproval
 )
 
 type model struct {
@@ -39,8 +41,9 @@ type model struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	eventCh <-chan event.Event
-	cumIn   int
-	cumOut  int
+	cumIn       int
+	cumOut      int
+	pendingTool string
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
@@ -81,6 +84,28 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		return m, nil
 	case tea.KeyMsg:
+		if m.state == stateAwaitingApproval {
+			switch {
+			case msg.Type == tea.KeyEscape:
+				m.engine.SubmitApproval("deny")
+				m.state = stateRunning
+				return m, nil
+			case msg.Type == tea.KeyRunes && len(msg.Runes) == 1:
+				switch msg.Runes[0] {
+				case 'y':
+					m.engine.SubmitApproval("allow")
+				case 'n':
+					m.engine.SubmitApproval("deny")
+				case 'a':
+					m.engine.SubmitApproval("always")
+				default:
+					return m, nil
+				}
+				m.state = stateRunning
+				return m, nil
+			}
+			return m, nil
+		}
 		switch {
 		case msg.Type == tea.KeyCtrlC:
 			return m, tea.Quit
@@ -136,6 +161,9 @@ func (m *model) handleEvent(ev event.Event) {
 		m.sb.appendError(e.Err)
 	case event.Compacted:
 		m.sb.appendUser(fmt.Sprintf("context compressed: %d→%d tokens", e.Before, e.After))
+	case event.RequireApproval:
+		m.pendingTool = e.ToolName
+		m.state = stateAwaitingApproval
 	}
 }
 
@@ -210,7 +238,11 @@ func redactKey(k string) string {
 }
 
 func (m *model) View() string {
+	scroll := m.sb.render(80)
+	if m.state == stateAwaitingApproval {
+		return scroll + "\n" + fmt.Sprintf("Approve %s? [y]es / [n]o / [a]lways (ESC=deny)", m.pendingTool) + "\n" + m.input.View()
+	}
 	status := fmt.Sprintf("model=%s | perm=%s | tokens in=%d out=%d",
 		m.engine.ModelName(), m.cfg.Permission, m.cumIn, m.cumOut)
-	return m.sb.render(80) + "\n" + status + "\n" + m.input.View()
+	return scroll + "\n" + status + "\n" + m.input.View()
 }
