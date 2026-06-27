@@ -11,6 +11,7 @@ import (
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/skill"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/event"
 	"github.com/alanfokco/lathe/internal/session"
@@ -222,5 +223,34 @@ func TestEnginePersistsNewSession(t *testing.T) {
 	blob := string(data)
 	if !strings.Contains(blob, "marker-prompt") || !strings.Contains(blob, "marker-response") {
 		t.Fatalf("JSONL missing turn content:\n%s", blob)
+	}
+}
+
+func TestEngineSkillToolReturnsBody(t *testing.T) {
+	skills := []skill.Skill{{Name: "demo", Description: "d", Markdown: "DEMO-BODY-TEXT"}}
+	tk := tool.NewToolkit(skill.NewSkillViewerTool(skills))
+	m := &fakeModel{turns: [][]model.ChatResponse{
+		// turn 1: model calls the Skill tool
+		{finalChunk(&model.ChatUsage{}, toolCallBlock("s1", "Skill", `{"skill":"demo"}`))},
+		// turn 2: final text
+		{textChunk("done"), finalChunk(&model.ChatUsage{})},
+	}}
+	eng := newEngineForTest(m, tk, bypassEngine(), 10)
+	evs := drain(eng.Run(context.Background(), "use the demo skill"))
+
+	var sawResult bool
+	for _, ev := range evs {
+		if tr, ok := ev.(event.ToolResult); ok && tr.Name == "Skill" {
+			sawResult = true
+			if tr.State != "success" {
+				t.Fatalf("Skill tool state: %s", tr.State)
+			}
+			if !strings.Contains(tr.Output, "DEMO-BODY-TEXT") {
+				t.Fatalf("Skill tool output missing body: %q", tr.Output)
+			}
+		}
+	}
+	if !sawResult {
+		t.Fatalf("no Skill ToolResult event in: %+v", evs)
 	}
 }
