@@ -20,6 +20,7 @@ type Engine struct {
 	permEng   *permission.Engine
 	maxIters  int
 	conv      []*message.Msg
+	cfg       *config.Config
 }
 
 // NewEngine assembles an Engine from a resolved config (production path:
@@ -39,6 +40,7 @@ func NewEngine(cfg *config.Config) (*Engine, error) {
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 		maxIters: cfg.MaxIters,
 		conv:     []*message.Msg{message.SystemMsg("lathe", buildSystemPrompt(cwd, tk, loadMemoryFiles(cwd)))},
+		cfg:      cfg,
 	}, nil
 }
 
@@ -49,8 +51,36 @@ func newEngineForTest(cm model.ChatModel, tk *tool.Toolkit, eng *permission.Engi
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: eng,
 		maxIters: maxIters,
 		conv:     []*message.Msg{message.SystemMsg("lathe", buildSystemPrompt("", tk, ""))},
+		cfg:      &config.Config{Provider: "openai", Model: "test-model", APIKey: "k"},
 	}
 }
+
+// SetModel switches the chat model (same provider, new model name). The new
+// model is rebuilt from the stored config; conversation history is preserved.
+// Unknown model names are accepted (the API layer reports the error on next call).
+func (e *Engine) SetModel(name string) error {
+	e.cfg.Model = name
+	cm, err := buildChatModel(e.cfg)
+	if err != nil {
+		return err
+	}
+	e.chatModel = cm
+	return nil
+}
+
+// ListModels returns model names available for the current provider.
+func (e *Engine) ListModels() []string {
+	var out []string
+	for _, c := range model.ListModels() {
+		if c.Provider == e.cfg.Provider {
+			out = append(out, c.Name)
+		}
+	}
+	return out
+}
+
+// ModelName returns the current model name.
+func (e *Engine) ModelName() string { return e.cfg.Model }
 
 func buildChatModel(cfg *config.Config) (model.ChatModel, error) {
 	switch cfg.Provider {
