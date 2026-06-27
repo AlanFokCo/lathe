@@ -14,13 +14,14 @@ import (
 // Engine is lathe's turn engine. It is NOT a wrapper around UnifiedAgent;
 // it drives model.ChatStream directly in its own loop.
 type Engine struct {
-	name      string
-	chatModel model.ChatModel
-	toolkit   *tool.Toolkit
-	permEng   *permission.Engine
-	maxIters  int
-	conv      []*message.Msg
-	cfg       *config.Config
+	name        string
+	chatModel   model.ChatModel
+	toolkit     *tool.Toolkit
+	permEng     *permission.Engine
+	maxIters    int
+	conv        []*message.Msg
+	cfg         *config.Config
+	compressCfg compressConfig
 }
 
 // NewEngine assembles an Engine from a resolved config (production path:
@@ -38,9 +39,10 @@ func NewEngine(cfg *config.Config) (*Engine, error) {
 	cwd := mustCwd()
 	return &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
-		maxIters: cfg.MaxIters,
-		conv:     []*message.Msg{message.SystemMsg("lathe", buildSystemPrompt(cwd, tk, loadMemoryFiles(cwd)))},
-		cfg:      cfg,
+		maxIters:    cfg.MaxIters,
+		conv:        []*message.Msg{message.SystemMsg("lathe", buildSystemPrompt(cwd, tk, loadMemoryFiles(cwd)))},
+		cfg:         cfg,
+		compressCfg: defaultCompressConfig(),
 	}, nil
 }
 
@@ -49,9 +51,10 @@ func newEngineForTest(cm model.ChatModel, tk *tool.Toolkit, eng *permission.Engi
 	agentscope.Init()
 	return &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: eng,
-		maxIters: maxIters,
-		conv:     []*message.Msg{message.SystemMsg("lathe", buildSystemPrompt("", tk, ""))},
-		cfg:      &config.Config{Provider: "openai", Model: "test-model", APIKey: "k"},
+		maxIters:    maxIters,
+		conv:        []*message.Msg{message.SystemMsg("lathe", buildSystemPrompt("", tk, ""))},
+		cfg:         &config.Config{Provider: "openai", Model: "test-model", APIKey: "k"},
+		compressCfg: defaultCompressConfig(),
 	}
 }
 

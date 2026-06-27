@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -126,7 +127,7 @@ func splitContextForCompression(conv []*message.Msg, reserveBudget int, counter 
 		}
 	}
 	if splitIdx >= len(ctxMsgs) {
-		splitIdx = adjustSplitForToolPairs(ctxMsgs, len(ctxMsgs) - 1)
+		splitIdx = adjustSplitForToolPairs(ctxMsgs, len(ctxMsgs)-1)
 	} else {
 		splitIdx = adjustSplitForToolPairs(ctxMsgs, splitIdx)
 	}
@@ -166,4 +167,67 @@ func adjustSplitForToolPairs(msgs []*message.Msg, splitIdx int) int {
 		return splitIdx
 	}
 	return maxOrphanIdx + 1
+}
+
+// compressContext checks if e.conv exceeds the context threshold and, if so,
+// generates a structured summary of the older messages and replaces them.
+// If force is true it compresses regardless of threshold (for /compact).
+// Returns compacted=true if compression happened, plus before/after token counts.
+func (e *Engine) compressContext(ctx context.Context, force bool) (compacted bool, before, after int, err error) {
+	cfg := e.compressCfg
+	ctxSize := cfg.ContextSize
+	if ctxSize == 0 {
+		ctxSize = model.ResolveContextSize(e.chatModel, 128000)
+	}
+	tools := e.toolkit.GetToolSchemas()
+	before = e.chatModel.CountTokens(e.conv, tools)
+	threshold := int(float64(ctxSize) * cfg.TriggerRatio)
+	if !force && before < threshold {
+		return false, before, 0, nil
+	}
+	if len(e.conv) <= 1 {
+		return false, before, before, nil // only system, nothing to compress
+	}
+	reserveBudget := int(float64(ctxSize) * cfg.ReserveRatio)
+	toCompress, toReserve := splitContextForCompression(e.conv, reserveBudget, e.chatModel, tools)
+	if len(toCompress) == 0 {
+		return false, before, before, nil
+	}
+	systemPrompt := ""
+	if t := e.conv[0].GetTextContent("\n"); t != nil {
+		systemPrompt = *t
+	}
+	compMsgs := buildCompressionMessages(systemPrompt, "", toCompress, cfg.CompressionPrompt)
+	result, rerr := model.GenerateStructuredOutput(ctx, e.chatModel, compMsgs, cfg.SummarySchema)
+	if rerr != nil {
+		result, rerr = e.retryCompressWithFewer(ctx, systemPrompt, toCompress, cfg, ctxSize, tools)
+		if rerr != nil {
+			return false, before, 0, fmt.Errorf("compress: %w", rerr)
+		}
+	}
+	summary, ferr := formatSummary(cfg.SummaryTemplate, result)
+	if ferr != nil {
+		return false, before, 0, fmt.Errorf("format summary: %w", ferr)
+	}
+	summaryMsg := message.UserMsg("user", "[Previous context summary]\n"+summary)
+	newConv := make([]*message.Msg, 0, 2+len(toReserve))
+	newConv = append(newConv, e.conv[0], summaryMsg)
+	newConv = append(newConv, toReserve...)
+	e.conv = newConv
+	after = e.chatModel.CountTokens(e.conv, tools)
+	return true, before, after, nil
+}
+
+// retryCompressWithFewer drops the oldest to-compress messages until the
+// compression messages fit under the trigger threshold, then retries.
+func (e *Engine) retryCompressWithFewer(ctx context.Context, systemPrompt string, toCompress []*message.Msg, cfg compressConfig, ctxSize int, tools []model.ToolSchema) (json.RawMessage, error) {
+	threshold := int(float64(ctxSize) * cfg.TriggerRatio)
+	for i := 1; i <= len(toCompress); i++ {
+		msgs := buildCompressionMessages(systemPrompt, "", toCompress[i:], cfg.CompressionPrompt)
+		tokens := e.chatModel.CountTokens(msgs, tools)
+		if tokens < threshold {
+			return model.GenerateStructuredOutput(ctx, e.chatModel, msgs, cfg.SummarySchema)
+		}
+	}
+	return nil, fmt.Errorf("cannot reduce context below threshold")
 }
