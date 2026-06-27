@@ -14,6 +14,7 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	mvdan.cc/sh/v3 v3.13.1 // indirect
 )
 
 // Dev-only: resolve agentscope-go from the local sibling checkout.
