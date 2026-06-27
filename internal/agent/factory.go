@@ -7,8 +7,10 @@ import (
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/skill"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/config"
+	"github.com/alanfokco/lathe/internal/skills"
 	"github.com/alanfokco/lathe/internal/session"
 )
 
@@ -41,6 +43,14 @@ func NewEngine(cfg *config.Config) (*Engine, error) {
 	permCtx := permission.NewContext(permission.PermissionMode(cfg.Permission))
 	permEng := permission.NewEngine(permCtx)
 
+	// M4a: discover skills (user ~/.lathe/skills + project .lathe/skills walk-up).
+	// Registered here so all paths (new/resume/continue) expose the Skill tool.
+	cwd := mustCwd()
+	skillsList, _ := skills.Discover(cwd)
+	if len(skillsList) > 0 {
+		tk.AddGroup("skills", skill.NewSkillViewerTool(skillsList))
+	}
+
 	// resume an existing session?
 	if cfg.Resume != "" {
 		sess, conv, err := session.Load(cfg.Resume)
@@ -65,8 +75,11 @@ func NewEngine(cfg *config.Config) (*Engine, error) {
 		}, nil
 	}
 
-	cwd := mustCwd()
-	sysMsg := message.SystemMsg("lathe", buildSystemPrompt(cwd, tk, loadMemoryFiles(cwd), ""))
+	skillsSection := ""
+	if len(skillsList) > 0 {
+		skillsSection = skill.FormatSkillInstructions(skillsList)
+	}
+	sysMsg := message.SystemMsg("lathe", buildSystemPrompt(cwd, tk, loadMemoryFiles(cwd), skillsSection))
 	sess, _ := session.New(cwd, cfg.Model) // best-effort; nil on failure → no persistence
 	e := &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,

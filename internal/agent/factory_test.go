@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -62,5 +64,52 @@ func TestNewEngineResume(t *testing.T) {
 	}
 	if !strings.Contains(blob, "previous turn") {
 		t.Fatalf("resumed conv missing history:\n%s", blob)
+	}
+}
+
+func TestNewEngineRegistersSkillToolWhenSkillsExist(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "proj") // under home → project walk stops at home
+	mustMkdir(t, work)
+	skillDir := filepath.Join(work, ".lathe", "skills", "demo")
+	mustMkdir(t, skillDir)
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"),
+		[]byte("---\nname: demo\ndescription: a demo\n---\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Chdir(work)
+
+	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "accept_edits", MaxIters: 10}
+	eng, err := NewEngine(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eng.toolkit.Get("Skill") == nil {
+		t.Fatal("Skill tool not registered when a skill exists")
+	}
+}
+
+func TestNewEngineNoSkillToolWhenAbsent(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "proj2")
+	mustMkdir(t, work)
+	t.Setenv("HOME", home)
+	t.Chdir(work)
+
+	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "accept_edits", MaxIters: 10}
+	eng, err := NewEngine(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eng.toolkit.Get("Skill") != nil {
+		t.Fatal("Skill tool should not be registered when no skills exist")
+	}
+}
+
+func mustMkdir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
 	}
 }
