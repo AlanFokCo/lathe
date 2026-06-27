@@ -18,13 +18,13 @@ type Engine struct {
 	chatModel model.ChatModel
 	toolkit   *tool.Toolkit
 	permEng   *permission.Engine
-	sysPrompt string
 	maxIters  int
 	conv      []*message.Msg
 }
 
 // NewEngine assembles an Engine from a resolved config (production path:
-// builds a real ChatModel for the configured provider).
+// builds a real ChatModel for the configured provider). The system prompt is
+// built once at construction (env + tool descriptions + project memory).
 func NewEngine(cfg *config.Config) (*Engine, error) {
 	agentscope.Init()
 	cm, err := buildChatModel(cfg)
@@ -34,10 +34,11 @@ func NewEngine(cfg *config.Config) (*Engine, error) {
 	tk := tool.NewEnhancedToolkit()
 	permCtx := permission.NewContext(permission.PermissionMode(cfg.Permission))
 	permEng := permission.NewEngine(permCtx)
+	cwd := mustCwd()
 	return &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
-		sysPrompt: systemPrompt(), maxIters: cfg.MaxIters,
-		conv: []*message.Msg{message.SystemMsg("lathe", systemPrompt())},
+		maxIters: cfg.MaxIters,
+		conv:     []*message.Msg{message.SystemMsg("lathe", buildSystemPrompt(cwd, tk, loadMemoryFiles(cwd)))},
 	}, nil
 }
 
@@ -46,8 +47,8 @@ func newEngineForTest(cm model.ChatModel, tk *tool.Toolkit, eng *permission.Engi
 	agentscope.Init()
 	return &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: eng,
-		sysPrompt: systemPrompt(), maxIters: maxIters,
-		conv: []*message.Msg{message.SystemMsg("lathe", systemPrompt())},
+		maxIters: maxIters,
+		conv:     []*message.Msg{message.SystemMsg("lathe", buildSystemPrompt("", tk, ""))},
 	}
 }
 
