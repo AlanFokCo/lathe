@@ -6,6 +6,7 @@ import (
 
 	"github.com/alanfokco/lathe/internal/cli"
 	"github.com/alanfokco/lathe/internal/config"
+	"github.com/alanfokco/lathe/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -30,9 +31,6 @@ func newRootCmd() *cobra.Command {
 	root.Flags().IntVar(&maxIters, "max-iters", 50, "max agent iterations")
 
 	root.RunE = func(cmd *cobra.Command, args []string) error {
-		if prompt == "" {
-			return fmt.Errorf("M1: pass -p \"prompt\" (interactive TUI arrives in M2)")
-		}
 		cfg, err := config.Load(config.Flags{
 			Provider: provider, Model: model, APIKey: apiKey, BaseURL: baseURL,
 			Permission: permissionMode, Output: output, MaxIters: maxIters, Prompt: prompt,
@@ -40,8 +38,10 @@ func newRootCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		os.Exit(cli.RunPrint(cmd.Context(), cfg))
-		return nil
+		if prompt != "" {
+			os.Exit(cli.RunPrint(cmd.Context(), cfg))
+		}
+		return tui.Run(cfg)
 	}
 	return root
 }
