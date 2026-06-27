@@ -20,10 +20,7 @@ func (e *Engine) Run(ctx context.Context, prompt string) <-chan event.Event {
 
 func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Event) {
 	defer close(ch)
-	conv := []*message.Msg{
-		message.SystemMsg(e.name, e.sysPrompt),
-		message.UserMsg(e.name, prompt),
-	}
+	e.conv = append(e.conv, message.UserMsg(e.name, prompt))
 	tools := e.toolkit.GetToolSchemas()
 
 	for iter := 0; iter < e.maxIters; iter++ {
@@ -31,7 +28,7 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 			emitEvent(ctx, ch, event.ReplyEnd{Reason: "cancelled"})
 			return
 		}
-		chunkCh, err := e.chatModel.ChatStream(ctx, conv,
+		chunkCh, err := e.chatModel.ChatStream(ctx, e.conv,
 			model.WithTools(tools),
 			model.WithToolChoice(&model.ToolChoice{Mode: "auto"}),
 		)
@@ -60,7 +57,7 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 			blocks = append(blocks, message.TextBlock{Type: "text", Text: text})
 		}
 		blocks = append(blocks, toolCallsToBlocks(toolCalls)...)
-		conv = append(conv, message.AssistantMsg(e.name, blocks))
+		e.conv = append(e.conv, message.AssistantMsg(e.name, blocks))
 
 		if len(toolCalls) == 0 {
 			emitEvent(ctx, ch, event.ReplyEnd{Reason: "end_turn"})
@@ -71,7 +68,7 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 			func(ev event.Event) { emitEvent(ctx, ch, ev) })
 		// tool results go in an assistant-role message (agentscope-go convention;
 		// formatters translate to each provider's wire format).
-		conv = append(conv, message.AssistantMsg(e.name, toolResultsToBlocks(results)))
+		e.conv = append(e.conv, message.AssistantMsg(e.name, toolResultsToBlocks(results)))
 	}
 	emitEvent(ctx, ch, event.ReplyEnd{Reason: "max_iters"})
 }

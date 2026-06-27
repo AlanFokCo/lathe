@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	agentscope "github.com/alanfokco/agentscope-go/pkg/agentscope"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
@@ -19,6 +20,7 @@ type Engine struct {
 	permEng   *permission.Engine
 	sysPrompt string
 	maxIters  int
+	conv      []*message.Msg
 }
 
 // NewEngine assembles an Engine from a resolved config (production path:
@@ -35,6 +37,7 @@ func NewEngine(cfg *config.Config) (*Engine, error) {
 	return &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 		sysPrompt: systemPrompt(), maxIters: cfg.MaxIters,
+		conv: []*message.Msg{message.SystemMsg("lathe", systemPrompt())},
 	}, nil
 }
 
@@ -44,6 +47,7 @@ func newEngineForTest(cm model.ChatModel, tk *tool.Toolkit, eng *permission.Engi
 	return &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: eng,
 		sysPrompt: systemPrompt(), maxIters: maxIters,
+		conv: []*message.Msg{message.SystemMsg("lathe", systemPrompt())},
 	}
 }
 

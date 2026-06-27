@@ -3,8 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
@@ -112,5 +115,68 @@ func TestEngineCancel(t *testing.T) {
 	re, ok := last.(event.ReplyEnd)
 	if !ok || (re.Reason != "cancelled" && re.Reason != "end_turn") {
 		t.Fatalf("last: %+v", last)
+	}
+}
+
+// recordingModel is a fake ChatModel that records the msgs passed to each
+// ChatStream call (to assert multi-turn conversation persistence).
+type recordingModel struct {
+	turns [][]model.ChatResponse
+	calls [][]*message.Msg
+}
+
+func (r *recordingModel) Chat(ctx context.Context, msgs []*message.Msg, opts ...model.CallOption) (*model.ChatResponse, error) {
+	return nil, errRecordingChat
+}
+
+func (r *recordingModel) ChatStream(ctx context.Context, msgs []*message.Msg, opts ...model.CallOption) (<-chan model.ChatResponse, error) {
+	r.calls = append(r.calls, msgs)
+	i := len(r.calls) - 1
+	if i >= len(r.turns) {
+		return nil, errRecordingNoTurns
+	}
+	chunks := r.turns[i]
+	ch := make(chan model.ChatResponse, len(chunks))
+	go func() {
+		defer close(ch)
+		for _, c := range chunks {
+			ch <- c
+		}
+	}()
+	return ch, nil
+}
+
+func (r *recordingModel) CountTokens(msgs []*message.Msg, tools []model.ToolSchema) int { return 0 }
+
+var (
+	errRecordingChat    = errors.New("recordingModel: Chat not used")
+	errRecordingNoTurns = errors.New("recordingModel: no more scripted turns")
+)
+
+func TestEngineMultiTurnConversationPersists(t *testing.T) {
+	m := &recordingModel{turns: [][]model.ChatResponse{
+		{textChunk("hello"), finalChunk(&model.ChatUsage{})},
+		{textChunk("ok"), finalChunk(&model.ChatUsage{})},
+	}}
+	eng := newEngineForTest(m, tool.NewToolkit(), bypassEngine(), 10)
+	for range eng.Run(context.Background(), "first") {
+	}
+	for range eng.Run(context.Background(), "second") {
+	}
+	if len(m.calls) != 2 {
+		t.Fatalf("ChatStream calls: %d", len(m.calls))
+	}
+	blob := ""
+	for _, mm := range m.calls[1] {
+		blob += string(mm.Role) + ":"
+		if txt := mm.GetTextContent(" "); txt != nil {
+			blob += *txt
+		}
+		blob += "\n"
+	}
+	for _, want := range []string{"first", "hello", "second"} {
+		if !strings.Contains(blob, want) {
+			t.Fatalf("turn-2 conv missing %q:\n%s", want, blob)
+		}
 	}
 }
