@@ -38,6 +38,31 @@ func NewEngine(cfg *config.Config) (*Engine, error) {
 	tk := tool.NewEnhancedToolkit()
 	permCtx := permission.NewContext(permission.PermissionMode(cfg.Permission))
 	permEng := permission.NewEngine(permCtx)
+
+	// resume an existing session?
+	if cfg.Resume != "" {
+		sess, conv, err := session.Load(cfg.Resume)
+		if err != nil {
+			return nil, fmt.Errorf("resume: %w", err)
+		}
+		return &Engine{
+			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
+			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
+			conv: conv, session: sess,
+		}, nil
+	}
+	if cfg.Continue {
+		sess, conv, err := session.Latest(mustCwd())
+		if err != nil {
+			return nil, fmt.Errorf("continue: %w", err)
+		}
+		return &Engine{
+			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
+			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
+			conv: conv, session: sess,
+		}, nil
+	}
+
 	cwd := mustCwd()
 	sysMsg := message.SystemMsg("lathe", buildSystemPrompt(cwd, tk, loadMemoryFiles(cwd)))
 	sess, _ := session.New(cwd, cfg.Model) // best-effort; nil on failure → no persistence

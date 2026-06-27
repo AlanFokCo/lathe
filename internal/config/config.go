@@ -28,12 +28,16 @@ type Config struct {
 	Output     Output
 	MaxIters   int
 	Prompt     string
+	Resume     string
+	Continue   bool
 }
 
 // Flags holds CLI overrides; empty fields are unset.
 type Flags struct {
 	Provider, Model, APIKey, BaseURL, Permission, Output, Prompt string
 	MaxIters int
+	Resume   string
+	Continue bool
 }
 
 // Load resolves a Config from flags + env + defaults.
@@ -43,6 +47,8 @@ func Load(f Flags) (*Config, error) {
 		Output:     OutputText,
 		MaxIters:   50,
 		Prompt:     f.Prompt,
+		Resume:     f.Resume,
+		Continue:   f.Continue,
 	}
 	if f.Permission != "" {
 		cfg.Permission = f.Permission

@@ -47,3 +47,21 @@ func TestLoadNoKey(t *testing.T) {
 		t.Fatal("expected error when no API key")
 	}
 }
+
+func TestLoadResumeContinuePassThrough(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	cfg, err := Load(Flags{Prompt: "hi", Resume: "sess-123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Resume != "sess-123" {
+		t.Fatalf("resume: %s", cfg.Resume)
+	}
+	cfg2, err := Load(Flags{Prompt: "hi", Continue: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg2.Continue {
+		t.Fatal("continue not set")
+	}
+}
