@@ -9,6 +9,7 @@ import (
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/config"
+	"github.com/alanfokco/lathe/internal/session"
 )
 
 // Engine is lathe's turn engine. It is NOT a wrapper around UnifiedAgent;
@@ -22,6 +23,7 @@ type Engine struct {
 	conv        []*message.Msg
 	cfg         *config.Config
 	compressCfg compressConfig
+	session     *session.Session
 }
 
 // NewEngine assembles an Engine from a resolved config (production path:
@@ -37,13 +39,18 @@ func NewEngine(cfg *config.Config) (*Engine, error) {
 	permCtx := permission.NewContext(permission.PermissionMode(cfg.Permission))
 	permEng := permission.NewEngine(permCtx)
 	cwd := mustCwd()
-	return &Engine{
+	sysMsg := message.SystemMsg("lathe", buildSystemPrompt(cwd, tk, loadMemoryFiles(cwd)))
+	sess, _ := session.New(cwd, cfg.Model) // best-effort; nil on failure → no persistence
+	e := &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
-		maxIters:    cfg.MaxIters,
-		conv:        []*message.Msg{message.SystemMsg("lathe", buildSystemPrompt(cwd, tk, loadMemoryFiles(cwd)))},
-		cfg:         cfg,
-		compressCfg: defaultCompressConfig(),
-	}, nil
+		maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
+		session: sess,
+	}
+	if sess != nil {
+		_ = sess.SaveMeta()
+	}
+	e.appendConv(sysMsg)
+	return e, nil
 }
 
 // newEngineForTest wires an Engine with an injected model/toolkit/engine.

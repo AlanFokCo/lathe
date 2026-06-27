@@ -20,7 +20,7 @@ func (e *Engine) Run(ctx context.Context, prompt string) <-chan event.Event {
 
 func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Event) {
 	defer close(ch)
-	e.conv = append(e.conv, message.UserMsg(e.name, prompt))
+	e.appendConv(message.UserMsg(e.name, prompt))
 	tools := e.toolkit.GetToolSchemas()
 
 	for iter := 0; iter < e.maxIters; iter++ {
@@ -63,7 +63,7 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 			blocks = append(blocks, message.TextBlock{Type: "text", Text: text})
 		}
 		blocks = append(blocks, toolCallsToBlocks(toolCalls)...)
-		e.conv = append(e.conv, message.AssistantMsg(e.name, blocks))
+		e.appendConv(message.AssistantMsg(e.name, blocks))
 
 		if len(toolCalls) == 0 {
 			emitEvent(ctx, ch, event.ReplyEnd{Reason: "end_turn"})
@@ -74,9 +74,17 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 			func(ev event.Event) { emitEvent(ctx, ch, ev) })
 		// tool results go in an assistant-role message (agentscope-go convention;
 		// formatters translate to each provider's wire format).
-		e.conv = append(e.conv, message.AssistantMsg(e.name, toolResultsToBlocks(results)))
+		e.appendConv(message.AssistantMsg(e.name, toolResultsToBlocks(results)))
 	}
 	emitEvent(ctx, ch, event.ReplyEnd{Reason: "max_iters"})
+}
+
+// appendConv appends a message to e.conv and persists it to the session (if any).
+func (e *Engine) appendConv(msg *message.Msg) {
+	e.conv = append(e.conv, msg)
+	if e.session != nil {
+		_ = e.session.Save(msg)
+	}
 }
 
 func toolCallsToBlocks(calls []message.ToolCallBlock) []message.ContentBlock {

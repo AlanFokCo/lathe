@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/event"
+	"github.com/alanfokco/lathe/internal/session"
 )
 
 func drain(ch <-chan event.Event) []event.Event {
@@ -194,5 +196,31 @@ func TestEngineAutoCompactEmitsEvent(t *testing.T) {
 	}
 	if !sawCompacted {
 		t.Fatalf("expected Compacted event in: %+v", evs)
+	}
+}
+
+func TestEnginePersistsNewSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := &fakeModel{turns: [][]model.ChatResponse{
+		{textChunk("marker-response"), finalChunk(&model.ChatUsage{})},
+	}}
+	eng := newEngineForTest(m, tool.NewToolkit(), bypassEngine(), 10)
+	sess, err := session.New("/p", "test-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.SaveMeta(); err != nil {
+		t.Fatal(err)
+	}
+	eng.session = sess
+	for range eng.Run(context.Background(), "marker-prompt") {
+	}
+	data, err := os.ReadFile(sess.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob := string(data)
+	if !strings.Contains(blob, "marker-prompt") || !strings.Contains(blob, "marker-response") {
+		t.Fatalf("JSONL missing turn content:\n%s", blob)
 	}
 }
