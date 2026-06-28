@@ -9,10 +9,19 @@ import (
 	"path/filepath"
 )
 
+// StatusLineConfig is the parsed statusLine setting (M5b). Type is "command".
+type StatusLineConfig struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+	Padding int    `json:"padding"`
+}
+
 // Settings is the parsed settings.json. The Hooks map is keyed by hook event
-// name (PreToolUse, PostToolUse, UserPromptSubmit, Stop).
+// name (PreToolUse, PostToolUse, UserPromptSubmit, Stop). StatusLine (M5b) is
+// the optional custom TUI status line command.
 type Settings struct {
-	Hooks map[string][]Matcher `json:"hooks"`
+	Hooks      map[string][]Matcher `json:"hooks"`
+	StatusLine *StatusLineConfig    `json:"statusLine"`
 }
 
 // Matcher is one matcher entry under an event: a tool-name pattern and the
@@ -46,6 +55,9 @@ func Load(cwd string) (*Settings, error) {
 		}
 		for event, matchers := range doc.Hooks {
 			s.Hooks[event] = matchers // project (loaded later) overrides user
+		}
+		if doc.StatusLine != nil {
+			s.StatusLine = doc.StatusLine
 		}
 		return nil
 	}

@@ -80,3 +80,46 @@ func TestLoadBadJSON(t *testing.T) {
 		t.Fatal("want error on bad json")
 	}
 }
+
+func TestLoadStatusLine(t *testing.T) {
+	cwd := t.TempDir()
+	writeSettings(t, filepath.Join(cwd, ".lathe", "settings.json"), map[string]any{
+		"statusLine": map[string]any{"type": "command", "command": "echo hi", "padding": 2},
+	})
+	s, err := Load(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.StatusLine == nil || s.StatusLine.Type != "command" ||
+		s.StatusLine.Command != "echo hi" || s.StatusLine.Padding != 2 {
+		t.Fatalf("StatusLine: %+v", s.StatusLine)
+	}
+}
+
+func TestLoadStatusLine_ProjectOverridesUser(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	t.Setenv("HOME", home)
+	writeSettings(t, filepath.Join(home, ".lathe", "settings.json"), map[string]any{
+		"statusLine": map[string]any{"type": "command", "command": "user-cmd"},
+	})
+	writeSettings(t, filepath.Join(cwd, ".lathe", "settings.json"), map[string]any{
+		"statusLine": map[string]any{"type": "command", "command": "proj-cmd", "padding": 1},
+	})
+	s, err := Load(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.StatusLine == nil || s.StatusLine.Command != "proj-cmd" || s.StatusLine.Padding != 1 {
+		t.Fatalf("project should override user: %+v", s.StatusLine)
+	}
+}
+
+func TestLoadStatusLine_Absent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	s, err := Load(t.TempDir())
+	if err != nil || s.StatusLine != nil {
+		t.Fatalf("want nil StatusLine, got %+v %v", s, err)
+	}
+}
