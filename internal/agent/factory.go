@@ -225,6 +225,12 @@ func buildChatModel(cfg *config.Config) (model.ChatModel, error) {
 		return model.NewDashScopeChatModel(model.DashScopeConfig{
 			APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model,
 		})
+	case "ollama":
+		return model.NewOpenAIChatModel(model.OpenAIConfig{
+			APIKey:  cfg.APIKey,
+			BaseURL: cfg.BaseURL,
+			Model:   cfg.Model,
+		})
 	}
 	return nil, fmt.Errorf("unsupported provider: %s", cfg.Provider)
 }

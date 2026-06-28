@@ -288,3 +288,20 @@ func TestNewEngineNoSandboxUsesHostBash(t *testing.T) {
 		t.Fatal("workspaceCloser should be nil without sandbox")
 	}
 }
+
+func TestBuildChatModelOllama(t *testing.T) {
+	cm, err := buildChatModel(&config.Config{Provider: "ollama", APIKey: "ollama", BaseURL: "http://localhost:11434", Model: "qwen2.5-coder"})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if cm == nil {
+		t.Fatal("nil model")
+	}
+}
+
+func TestBuildChatModelOllamaMissingModel(t *testing.T) {
+	_, err := buildChatModel(&config.Config{Provider: "ollama", APIKey: "ollama", BaseURL: "http://localhost:11434", Model: ""})
+	if err == nil {
+		t.Fatal("want error for missing model")
+	}
+}
