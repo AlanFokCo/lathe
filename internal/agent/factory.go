@@ -38,6 +38,8 @@ type Engine struct {
 	mcpClients      []mcp.Client
 	hookRunner      *hooks.Runner
 	workspaceCloser func() error
+	cwd             string              // M5b: cwd snapshot for statusline payload
+	settings        *settings.Settings // M5b: parsed settings (for StatusLineConfig)
 }
 
 // NewEngine assembles an Engine from a resolved config (production path:
@@ -110,6 +112,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
 			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
+		cwd: cwd, settings: settingsCfg,
 		}, nil
 	}
 	if cfg.Continue {
@@ -121,6 +124,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
 			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
+		cwd: cwd, settings: settingsCfg,
 		}, nil
 	}
 
@@ -134,6 +138,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 		maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
 		session: sess, approvalCh: make(chan string, 1), mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
+		cwd: cwd, settings: settingsCfg,
 	}
 	if sess != nil {
 		_ = sess.SaveMeta()
@@ -181,6 +186,26 @@ func (e *Engine) ListModels() []string {
 
 // ModelName returns the current model name.
 func (e *Engine) ModelName() string { return e.cfg.Model }
+
+// StatusInfo returns the session/cwd/context-size snapshot used to build a
+// statusline payload (M5b). session fields are "" when no session is active.
+func (e *Engine) StatusInfo() (cwd, sessionID, transcriptPath string, contextSize int) {
+	cwd = e.cwd
+	if e.session != nil {
+		sessionID = e.session.ID
+		transcriptPath = e.session.Path
+	}
+	contextSize = e.compressCfg.ContextSize
+	return
+}
+
+// StatusLineConfig returns the parsed statusLine setting, or nil if unset (M5b).
+func (e *Engine) StatusLineConfig() *settings.StatusLineConfig {
+	if e.settings == nil {
+		return nil
+	}
+	return e.settings.StatusLine
+}
 
 // SetInteractive enables (TUI) or disables (print) interactive approval.
 func (e *Engine) SetInteractive(b bool) { e.interactive = b }
