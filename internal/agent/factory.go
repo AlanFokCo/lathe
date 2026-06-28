@@ -18,6 +18,7 @@ import (
 	"github.com/alanfokco/lathe/internal/skills"
 	"github.com/alanfokco/lathe/internal/session"
 	"github.com/alanfokco/lathe/internal/settings"
+	"github.com/alanfokco/lathe/internal/workspace"
 )
 
 // Engine is lathe's turn engine. It is NOT a wrapper around UnifiedAgent;
@@ -34,8 +35,9 @@ type Engine struct {
 	session     *session.Session
 	interactive bool
 	approvalCh  chan string
-	mcpClients  []mcp.Client
-	hookRunner  *hooks.Runner
+	mcpClients      []mcp.Client
+	hookRunner      *hooks.Runner
+	workspaceCloser func() error
 }
 
 // NewEngine assembles an Engine from a resolved config (production path:
@@ -77,9 +79,26 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	}
 	hookRunner := hooks.NewRunner(settingsCfg.Hooks, cwd, "")
 
+	// M4e: optional sandbox workspace (default: host builtins). A setup
+	// failure fails loudly (no silent fallback to host execution).
+	var subToolkit *tool.Toolkit
+	var workspaceCloser func() error
+	if cfg.Sandbox != "" {
+		ws, closer, werr := workspace.NewWorkspace(ctx, cfg.Sandbox, cwd)
+		if werr != nil {
+			return nil, fmt.Errorf("sandbox: %w", werr)
+		}
+		tk = workspace.WorkspaceToolkit(ws)
+		workspaceCloser = closer
+		subToolkit = workspace.WorkspaceToolkit(ws)
+	} else {
+		subToolkit = tool.NewEnhancedToolkit()
+	}
+
 	// M4d: Task subagent tool (spawns a nested lathe Engine with a builtins-only
-	// toolkit — no Task, so the subagent cannot recurse).
-	tk.AddGroup("task", NewTaskTool(cm, permEng, cfg.MaxIters, tool.NewEnhancedToolkit()))
+	// toolkit — no Task, so the subagent cannot recurse). In sandbox mode the
+	// subagent shares the same workspace (no escape).
+	tk.AddGroup("task", NewTaskTool(cm, permEng, cfg.MaxIters, subToolkit))
 
 	// resume an existing session?
 	if cfg.Resume != "" {
@@ -90,7 +109,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		return &Engine{
 			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
-			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner,
+			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
 		}, nil
 	}
 	if cfg.Continue {
@@ -101,7 +120,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		return &Engine{
 			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
-			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner,
+			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
 		}, nil
 	}
 
@@ -114,7 +133,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	e := &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 		maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
-		session: sess, approvalCh: make(chan string, 1), mcpClients: mcpClients, hookRunner: hookRunner,
+		session: sess, approvalCh: make(chan string, 1), mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
 	}
 	if sess != nil {
 		_ = sess.SaveMeta()
@@ -185,6 +204,10 @@ func (e *Engine) Close() error {
 		}
 	}
 	e.mcpClients = nil
+	if e.workspaceCloser != nil {
+		_ = e.workspaceCloser()
+	}
+	e.workspaceCloser = nil
 	return nil
 }
 

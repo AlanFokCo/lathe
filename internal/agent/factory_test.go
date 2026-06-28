@@ -255,3 +255,36 @@ func TestNewEngineRegistersTaskTool(t *testing.T) {
 		t.Fatal("Task tool not registered")
 	}
 }
+
+func TestNewEngineSandboxE2BNoKeyErrors(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "proj")
+	mustMkdir(t, work)
+	t.Setenv("HOME", home)
+	t.Setenv("E2B_API_KEY", "")
+	t.Chdir(work)
+	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "bypass", MaxIters: 10, Sandbox: "e2b"}
+	if _, err := NewEngine(context.Background(), cfg); err == nil {
+		t.Fatal("want error for e2b sandbox without E2B_API_KEY")
+	}
+}
+
+func TestNewEngineNoSandboxUsesHostBash(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "proj")
+	mustMkdir(t, work)
+	t.Setenv("HOME", home)
+	t.Chdir(work)
+	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "bypass", MaxIters: 10} // Sandbox=""
+	eng, err := NewEngine(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	if eng.toolkit.Get("Bash") == nil {
+		t.Fatal("Bash tool not registered (host builtins)")
+	}
+	if eng.workspaceCloser != nil {
+		t.Fatal("workspaceCloser should be nil without sandbox")
+	}
+}
