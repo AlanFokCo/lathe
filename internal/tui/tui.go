@@ -10,6 +10,8 @@ import (
 
 	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/event"
+	"github.com/alanfokco/lathe/internal/settings"
+	"github.com/alanfokco/lathe/internal/statusline"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -22,6 +24,8 @@ type EngineControl interface {
 	ModelName() string
 	CompressNow(ctx context.Context) (string, error)
 	SubmitApproval(decision string)
+	StatusInfo() (cwd, sessionID, transcriptPath string, contextSize int)
+	StatusLineConfig() *settings.StatusLineConfig
 }
 
 type modelState int
@@ -33,17 +37,19 @@ const (
 )
 
 type model struct {
-	engine  EngineControl
-	cfg     *config.Config
-	input   textarea.Model
-	sb      scrollback
-	state   modelState
-	ctx     context.Context
-	cancel  context.CancelFunc
-	eventCh <-chan event.Event
-	cumIn       int
-	cumOut      int
-	pendingTool string
+	engine         EngineControl
+	cfg            *config.Config
+	input          textarea.Model
+	sb             scrollback
+	state          modelState
+	ctx            context.Context
+	cancel         context.CancelFunc
+	eventCh        <-chan event.Event
+	cumIn          int
+	cumOut         int
+	pendingTool    string
+	statusLineText string
+	slGen          int
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
@@ -51,7 +57,7 @@ func newModel(engine EngineControl, cfg *config.Config) *model {
 	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle}
 }
 
-func (m *model) Init() tea.Cmd { return m.input.Focus() }
+func (m *model) Init() tea.Cmd { return tea.Batch(m.input.Focus(), m.scheduleStatusLine()) }
 
 // submit starts a turn: appends the user prompt, runs the engine, begins pumping.
 func (m *model) submit(prompt string) tea.Cmd {
@@ -141,6 +147,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateIdle
 		m.cancel = nil
 		return m, nil
+	case statusLineMsg:
+		if msg.gen == m.slGen {
+			m.statusLineText = msg.text
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -165,6 +176,63 @@ func (m *model) handleEvent(ev event.Event) {
 		m.pendingTool = e.ToolName
 		m.state = stateAwaitingApproval
 	}
+}
+
+// statusLineMsg carries the result of an async statusline command run.
+type statusLineMsg struct {
+	gen  int
+	text string
+}
+
+// slConfig returns the active statusline command config, or zero+false when
+// no command is configured.
+func (m *model) slConfig() (statusline.Config, bool) {
+	slc := m.engine.StatusLineConfig()
+	if slc == nil || slc.Type != "command" || slc.Command == "" {
+		return statusline.Config{}, false
+	}
+	return statusline.Config{Type: slc.Type, Command: slc.Command, Padding: slc.Padding}, true
+}
+
+// scheduleStatusLine snapshots status data and returns a tea.Cmd that runs the
+// configured statusline command (if any). Stale runs are ignored via the gen
+// guard in Update. Returns nil when no command is configured.
+func (m *model) scheduleStatusLine() tea.Cmd {
+	m.slGen++
+	gen := m.slGen
+	cfg, ok := m.slConfig()
+	if !ok {
+		m.statusLineText = ""
+		return nil
+	}
+	cwd, sid, tp, ctxSize := m.engine.StatusInfo()
+	in := statusline.Input{
+		SessionID:      sid,
+		TranscriptPath: tp,
+		Cwd:            cwd,
+		Model:          m.engine.ModelName(),
+		Version:        config.Version,
+		ContextSize:    ctxSize,
+		InputTokens:    m.cumIn,
+		OutputTokens:   m.cumOut,
+	}
+	return func() tea.Msg {
+		text, _ := statusline.Run(context.Background(), cfg, in)
+		return statusLineMsg{gen: gen, text: text}
+	}
+}
+
+// statusLine returns the status line for View: the command output when set,
+// else the hardcoded fallback.
+func (m *model) statusLine() string {
+	if m.statusLineText != "" {
+		if cfg, ok := m.slConfig(); ok && cfg.Padding > 0 {
+			return strings.Repeat(" ", cfg.Padding) + m.statusLineText
+		}
+		return m.statusLineText
+	}
+	return fmt.Sprintf("model=%s | perm=%s | tokens in=%d out=%d",
+		m.engine.ModelName(), m.cfg.Permission, m.cumIn, m.cumOut)
 }
 
 // maybeSlash handles /help /clear /quit /model /config. Returns (cmd, true) if
@@ -242,7 +310,5 @@ func (m *model) View() string {
 	if m.state == stateAwaitingApproval {
 		return scroll + "\n" + fmt.Sprintf("Approve %s? [y]es / [n]o / [a]lways (ESC=deny)", m.pendingTool) + "\n" + m.input.View()
 	}
-	status := fmt.Sprintf("model=%s | perm=%s | tokens in=%d out=%d",
-		m.engine.ModelName(), m.cfg.Permission, m.cumIn, m.cumOut)
-	return scroll + "\n" + status + "\n" + m.input.View()
+	return scroll + "\n" + m.statusLine() + "\n" + m.input.View()
 }

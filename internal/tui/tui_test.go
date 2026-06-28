@@ -5,9 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/event"
+	"github.com/alanfokco/lathe/internal/settings"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // fakeRunner provides Run (the streaming channel); fakeControl embeds it and
@@ -32,11 +33,18 @@ type fakeControl struct {
 	sets          []string
 	compressCalls int
 	approvalCalls []string
+	slConfig      *settings.StatusLineConfig
+	cwd, sid, tp  string
+	ctxSize       int
 }
 
-func (f *fakeControl) SetModel(name string) error { f.sets = append(f.sets, name); f.model = name; return nil }
-func (f *fakeControl) ListModels() []string       { return f.models }
-func (f *fakeControl) ModelName() string          { return f.model }
+func (f *fakeControl) SetModel(name string) error {
+	f.sets = append(f.sets, name)
+	f.model = name
+	return nil
+}
+func (f *fakeControl) ListModels() []string { return f.models }
+func (f *fakeControl) ModelName() string    { return f.model }
 func (f *fakeControl) CompressNow(ctx context.Context) (string, error) {
 	f.compressCalls++
 	return "compressed: 10→5 tokens", nil
@@ -44,6 +52,11 @@ func (f *fakeControl) CompressNow(ctx context.Context) (string, error) {
 func (f *fakeControl) SubmitApproval(decision string) {
 	f.approvalCalls = append(f.approvalCalls, decision)
 }
+
+func (f *fakeControl) StatusInfo() (string, string, string, int) {
+	return f.cwd, f.sid, f.tp, f.ctxSize
+}
+func (f *fakeControl) StatusLineConfig() *settings.StatusLineConfig { return f.slConfig }
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 
@@ -217,5 +230,52 @@ func TestModelApprovalESC(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	if len(ctrl.approvalCalls) != 1 || ctrl.approvalCalls[0] != "deny" {
 		t.Fatalf("ESC: got %v want deny", ctrl.approvalCalls)
+	}
+}
+
+func TestStatusLineFallback(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.handleEvent(event.Usage{InputTokens: 7, OutputTokens: 3, Model: "gpt-4o"})
+	got := m.View()
+	if !strings.Contains(got, "model=gpt-4o") || !strings.Contains(got, "in=7 out=3") {
+		t.Fatalf("fallback status missing:\n%s", got)
+	}
+}
+
+func TestStatusLineRendersCommandOutput(t *testing.T) {
+	ctrl := &fakeControl{
+		model:    "gpt-4o",
+		slConfig: &settings.StatusLineConfig{Type: "command", Command: "echo OK"},
+		cwd:      t.TempDir(), sid: "s1", tp: "/p/s1.jsonl", ctxSize: 128000,
+	}
+	m := newModel(ctrl, testCfg())
+	cmd := m.scheduleStatusLine()
+	if cmd == nil {
+		t.Fatal("nil cmd for configured statusline")
+	}
+	m.Update(cmd())
+	got := m.View()
+	if !strings.Contains(got, "OK") {
+		t.Fatalf("status missing command output:\n%s", got)
+	}
+}
+
+func TestStatusLineGenGuard(t *testing.T) {
+	ctrl := &fakeControl{
+		model:    "gpt-4o",
+		slConfig: &settings.StatusLineConfig{Type: "command", Command: "echo first"},
+	}
+	m := newModel(ctrl, testCfg())
+	cmd1 := m.scheduleStatusLine() // gen=1, cfg.Command="echo first"
+	ctrl.slConfig.Command = "echo second"
+	cmd2 := m.scheduleStatusLine() // gen=2, cfg.Command="echo second"
+	m.Update(cmd2())               // applies gen2 → "second"
+	m.Update(cmd1())               // gen1 != slGen(2) → discarded
+	got := m.View()
+	if !strings.Contains(got, "second") {
+		t.Fatalf("want second (gen guard):\n%s", got)
+	}
+	if strings.Contains(got, "first") {
+		t.Fatalf("stale gen1 leaked:\n%s", got)
 	}
 }

@@ -10,6 +10,10 @@ import (
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/credential"
 )
 
+// Version is the lathe version surfaced to the statusline payload. Wire to
+// ldflags / debug.ReadBuildInfo before publishing.
+const Version = "0.1.0-dev"
+
 // Output is the print-mode output format.
 type Output string
 
@@ -36,9 +40,9 @@ type Config struct {
 // Flags holds CLI overrides; empty fields are unset.
 type Flags struct {
 	Provider, Model, APIKey, BaseURL, Permission, Output, Prompt, Sandbox string
-	MaxIters int
-	Resume   string
-	Continue bool
+	MaxIters                                                              int
+	Resume                                                                string
+	Continue                                                              bool
 }
 
 // Load resolves a Config from flags + env + defaults.
