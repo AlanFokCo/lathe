@@ -80,6 +80,17 @@ func Load(f Flags) (*Config, error) {
 		cfg.BaseURL = cred.BaseURL()
 		cfg.Model = pickDefaultModel(cfg.Provider, f.Model)
 	}
+	// M5a: ollama reuses the OpenAI client against a local OpenAI-compatible
+	// endpoint. Ollama needs no key, but the OpenAI client requires a non-empty
+	// APIKey, so default to a dummy. base-url defaults to the standard Ollama port.
+	if cfg.Provider == "ollama" {
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = "http://localhost:11434"
+		}
+		if cfg.APIKey == "" {
+			cfg.APIKey = "ollama"
+		}
+	}
 	if cfg.APIKey == "" {
 		return nil, fmt.Errorf("no API key for provider %q", cfg.Provider)
 	}

@@ -86,3 +86,39 @@ func TestLoadSandboxPassThrough(t *testing.T) {
 		t.Fatalf("default sandbox should be empty: %q", cfg2.Sandbox)
 	}
 }
+
+func TestLoadOllamaDefaults(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("DASHSCOPE_API_KEY", "")
+	cfg, err := Load(Flags{Provider: "ollama", Model: "qwen2.5-coder"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != "ollama" || cfg.BaseURL != "http://localhost:11434" || cfg.APIKey != "ollama" || cfg.Model != "qwen2.5-coder" {
+		t.Fatalf("cfg: %+v", cfg)
+	}
+}
+
+func TestLoadOllamaOverrides(t *testing.T) {
+	cfg, err := Load(Flags{Provider: "ollama", Model: "m", BaseURL: "http://x:1234", APIKey: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BaseURL != "http://x:1234" || cfg.APIKey != "k" {
+		t.Fatalf("overrides not applied: %+v", cfg)
+	}
+}
+
+func TestLoadOllamaMissingModel(t *testing.T) {
+	cfg, err := Load(Flags{Provider: "ollama"})
+	if err != nil {
+		t.Fatalf("config should not error on missing model (buildChatModel does): %v", err)
+	}
+	if cfg.Model != "" {
+		t.Fatalf("model should be empty: %q", cfg.Model)
+	}
+	if cfg.APIKey != "ollama" {
+		t.Fatalf("dummy key: %q", cfg.APIKey)
+	}
+}
