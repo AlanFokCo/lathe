@@ -11,6 +11,8 @@ import (
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/event"
+	"github.com/alanfokco/lathe/internal/hooks"
+	"github.com/alanfokco/lathe/internal/settings"
 )
 
 // echoTool returns its input text; carries a diff in metadata to test extraction.
@@ -161,5 +163,40 @@ func TestDispatchInteractiveCtxCancel(t *testing.T) {
 		tk, eng, true, approvalCh, func(event.Event) {})
 	if results[0].State != message.ToolResultDenied {
 		t.Fatalf("expected denied on ctx cancel: %s", results[0].State)
+	}
+}
+
+func TestDispatchPreToolUseBlock(t *testing.T) {
+	tk := tool.NewToolkit(echoTool())
+	eng := permission.NewEngine(permission.NewContext(permission.ModeBypass))
+	runner := hooks.NewRunner(map[string][]settings.Matcher{
+		"PreToolUse": {{Matcher: "echo", Hooks: []settings.Command{{Type: "command", Command: `printf '{"decision":"block","reason":"no"}'`}}}},
+	}, "/tmp", "")
+	emit, _ := collect()
+	results := dispatch(context.Background(),
+		[]message.ToolCallBlock{toolCallBlock("t1", "echo", `{"msg":"hi"}`)},
+		tk, eng, false, nil, emit, runner)
+	if results[0].State != message.ToolResultDenied {
+		t.Fatalf("PreToolUse block should deny: %s", results[0].State)
+	}
+	out, _ := results[0].Output.(string)
+	if !strings.Contains(out, "blocked by hook") {
+		t.Fatalf("output: %q", out)
+	}
+}
+
+func TestDispatchPostToolUseContext(t *testing.T) {
+	tk := tool.NewToolkit(echoTool())
+	eng := permission.NewEngine(permission.NewContext(permission.ModeBypass))
+	runner := hooks.NewRunner(map[string][]settings.Matcher{
+		"PostToolUse": {{Matcher: "echo", Hooks: []settings.Command{{Type: "command", Command: `printf '{"additionalContext":"extra"}'`}}}},
+	}, "/tmp", "")
+	emit, _ := collect()
+	results := dispatch(context.Background(),
+		[]message.ToolCallBlock{toolCallBlock("t1", "echo", `{"msg":"hi"}`)},
+		tk, eng, false, nil, emit, runner)
+	out, _ := results[0].Output.(string)
+	if !strings.Contains(out, "echoed: hi") || !strings.Contains(out, "extra") {
+		t.Fatalf("PostToolUse context not appended: %q", out)
 	}
 }

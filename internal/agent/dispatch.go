@@ -8,14 +8,15 @@ import (
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/event"
+	"github.com/alanfokco/lathe/internal/hooks"
 )
 
 // dispatch checks permissions and executes each tool call, returning
 // ToolResultBlocks (aligned by index to calls) and emitting ToolCallStart +
 // ToolResult events. In print mode, Ask is treated as Deny (no interactive
-// prompt); M2 TUI will prompt instead.
-//
-// M1 executes calls sequentially; concurrency-safe batching is a M2 refinement.
+// prompt); M2 TUI will prompt instead. runners is variadic so existing
+// callers pass nothing (nil runner → no hooks); pass one *hooks.Runner to
+// enable Pre/PostToolUse.
 func dispatch(
 	ctx context.Context,
 	calls []message.ToolCallBlock,
@@ -24,15 +25,20 @@ func dispatch(
 	interactive bool,
 	approvalCh chan string,
 	emit func(event.Event),
+	runners ...*hooks.Runner,
 ) []message.ToolResultBlock {
+	var runner *hooks.Runner
+	if len(runners) > 0 {
+		runner = runners[0]
+	}
 	results := make([]message.ToolResultBlock, len(calls))
 	for i, tc := range calls {
-		results[i] = runOneTool(ctx, tc, tk, eng, interactive, approvalCh, emit)
+		results[i] = runOneTool(ctx, tc, tk, eng, interactive, approvalCh, emit, runner)
 	}
 	return results
 }
 
-func runOneTool(ctx context.Context, tc message.ToolCallBlock, tk *tool.Toolkit, eng *permission.Engine, interactive bool, approvalCh chan string, emit func(event.Event)) message.ToolResultBlock {
+func runOneTool(ctx context.Context, tc message.ToolCallBlock, tk *tool.Toolkit, eng *permission.Engine, interactive bool, approvalCh chan string, emit func(event.Event), runner *hooks.Runner) message.ToolResultBlock {
 	t := tk.Get(tc.Name)
 	emit(event.ToolCallStart{ID: tc.ID, Name: tc.Name, Input: tc.Input})
 
@@ -42,10 +48,12 @@ func runOneTool(ctx context.Context, tc message.ToolCallBlock, tk *tool.Toolkit,
 		return tr
 	}
 
+	// Parse input once (best-effort; used by permission check + hook payloads).
+	input, inputErr := tc.ParseInput()
+
 	if eng != nil {
-		input, err := tc.ParseInput()
-		if err != nil {
-			tr := errorResult(tc, fmt.Sprintf("parse input: %v", err))
+		if inputErr != nil {
+			tr := errorResult(tc, fmt.Sprintf("parse input: %v", inputErr))
 			emit(toolResultEvent(tc, tr, ""))
 			return tr
 		}
@@ -84,6 +92,13 @@ func runOneTool(ctx context.Context, tc message.ToolCallBlock, tk *tool.Toolkit,
 		}
 	}
 
+	// M4c: PreToolUse hook (after permission, before execute). Block → deny.
+	if r, _ := runner.Run(ctx, "PreToolUse", map[string]any{"tool_name": tc.Name, "tool_input": input}); r.Block {
+		tr := deniedResult(tc, "blocked by hook: "+r.Reason)
+		emit(toolResultEvent(tc, tr, ""))
+		return tr
+	}
+
 	resp, err := tk.CallToolFromBlock(ctx, &tc)
 	if err != nil {
 		tr := errorResult(tc, err.Error())
@@ -100,6 +115,10 @@ func runOneTool(ctx context.Context, tc message.ToolCallBlock, tk *tool.Toolkit,
 	tr := message.ToolResultBlock{
 		Type: "tool_result", ID: tc.ID, Name: tc.Name,
 		Output: out, State: resp.State, Metadata: resp.Metadata,
+	}
+	// M4c: PostToolUse hook (inject context into output before emit).
+	if r, _ := runner.Run(ctx, "PostToolUse", map[string]any{"tool_name": tc.Name, "tool_input": input, "tool_output": out}); r.Context != "" {
+		tr.Output = out + "\n\n" + r.Context
 	}
 	emit(toolResultEvent(tc, tr, diff))
 	return tr
