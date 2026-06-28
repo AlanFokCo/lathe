@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# lathe build output (go build -o lathe ./cmd/lathe)
+/lathe
+
 # Test binary, built with `go test -c`
 *.test
 
