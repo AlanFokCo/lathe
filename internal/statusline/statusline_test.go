@@ -1,8 +1,10 @@
 package statusline
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestBuildJSON(t *testing.T) {
@@ -74,5 +76,46 @@ func TestBuildJSON_OmitsContextWindowWhenZero(t *testing.T) {
 	}
 	if m["exceeds_200k_tokens"] != false {
 		t.Errorf("exceeds_200k still emitted: %v", m["exceeds_200k_tokens"])
+	}
+}
+
+func TestRun_Success(t *testing.T) {
+	cfg := Config{Type: "command", Command: "echo hello-status"}
+	got, err := Run(context.Background(), cfg, Input{})
+	if err != nil || got != "hello-status" {
+		t.Fatalf("got %q err %v", got, err)
+	}
+}
+
+func TestRun_MultiLineTrimsDropsEmpty(t *testing.T) {
+	cfg := Config{Type: "command", Command: "printf ' a\\n\\nb \\n'"}
+	got, err := Run(context.Background(), cfg, Input{})
+	if err != nil || got != "a\nb" {
+		t.Fatalf("got %q err %v", got, err)
+	}
+}
+
+func TestRun_NonZeroExit(t *testing.T) {
+	cfg := Config{Type: "command", Command: "exit 1"}
+	got, err := Run(context.Background(), cfg, Input{})
+	if err == nil || got != "" {
+		t.Fatalf("got %q err %v", got, err)
+	}
+}
+
+func TestRun_Timeout(t *testing.T) {
+	cfg := Config{Type: "command", Command: "sleep 10"}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	got, err := Run(ctx, cfg, Input{})
+	if err == nil || got != "" {
+		t.Fatalf("got %q err %v (want timeout)", got, err)
+	}
+}
+
+func TestRun_NoCommand(t *testing.T) {
+	got, err := Run(context.Background(), Config{Type: "", Command: ""}, Input{})
+	if err != nil || got != "" {
+		t.Fatalf("got %q err %v", got, err)
 	}
 }

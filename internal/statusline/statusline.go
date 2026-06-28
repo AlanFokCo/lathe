@@ -5,7 +5,14 @@
 // JSON subset — fields lathe doesn't track yet are omitted, not stubbed.
 package statusline
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os/exec"
+	"strings"
+	"time"
+)
 
 // Config is the parsed statusLine setting.
 type Config struct {
@@ -88,4 +95,45 @@ func BuildJSON(in Input) []byte {
 // round1 rounds f to 1 decimal place.
 func round1(f float64) float64 {
 	return float64(int(f*10+0.5)) / 10
+}
+
+// Run executes cfg.Command with BuildJSON(in) on stdin. sh -c, cwd=in.Cwd,
+// 5s timeout (or ctx deadline, whichever is sooner). exit 0 → stdout trimmed,
+// split on '\n', empty lines dropped, each line trimmed, rejoined with '\n'
+// (mirrors Claude Code's statusline stdout handling). Non-zero exit / timeout
+// → "", err. Returns "", nil when cfg is not a command (Type != "command" or
+// empty Command).
+func Run(ctx context.Context, cfg Config, in Input) (string, error) {
+	if cfg.Type != "command" || cfg.Command == "" {
+		return "", nil
+	}
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, "sh", "-c", cfg.Command)
+	if in.Cwd != "" {
+		cmd.Dir = in.Cwd
+	}
+	cmd.Stdin = strings.NewReader(string(BuildJSON(in)))
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if cctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("statusline: timeout")
+		}
+		return "", fmt.Errorf("statusline: %v: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return trimLines(stdout.String()), nil
+}
+
+// trimLines trims the whole, splits on newlines, drops empty lines, trims each,
+// rejoins — matching Claude Code's statusline stdout normalization.
+func trimLines(s string) string {
+	out := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(s), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
 }
