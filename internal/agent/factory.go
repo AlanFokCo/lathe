@@ -77,6 +77,10 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	}
 	hookRunner := hooks.NewRunner(settingsCfg.Hooks, cwd, "")
 
+	// M4d: Task subagent tool (spawns a nested lathe Engine with a builtins-only
+	// toolkit — no Task, so the subagent cannot recurse).
+	tk.AddGroup("task", NewTaskTool(cm, permEng, cfg.MaxIters, tool.NewEnhancedToolkit()))
+
 	// resume an existing session?
 	if cfg.Resume != "" {
 		sess, conv, err := session.Load(cfg.Resume)

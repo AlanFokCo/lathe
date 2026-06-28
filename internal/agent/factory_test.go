@@ -237,3 +237,21 @@ func TestNewEngineWiresHookSettings(t *testing.T) {
 		t.Fatalf("runner not wired from settings: %+v", r)
 	}
 }
+
+func TestNewEngineRegistersTaskTool(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "proj")
+	mustMkdir(t, work)
+	t.Setenv("HOME", home)
+	t.Chdir(work)
+
+	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "bypass", MaxIters: 10}
+	eng, err := NewEngine(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	if eng.toolkit.Get("Task") == nil {
+		t.Fatal("Task tool not registered")
+	}
+}
