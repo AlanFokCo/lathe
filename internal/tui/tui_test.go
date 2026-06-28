@@ -279,3 +279,40 @@ func TestStatusLineGenGuard(t *testing.T) {
 		t.Fatalf("stale gen1 leaked:\n%s", got)
 	}
 }
+
+func TestStatusLineRefreshesAfterReplyEnd(t *testing.T) {
+	ctrl := &fakeControl{
+		model:    "gpt-4o",
+		slConfig: &settings.StatusLineConfig{Type: "command", Command: "echo refreshed"},
+		fakeRunner: fakeRunner{events: []event.Event{
+			event.Usage{InputTokens: 5, OutputTokens: 1, Model: "gpt-4o"},
+			event.ReplyEnd{Reason: "end_turn"},
+		}},
+	}
+	m := newModel(ctrl, testCfg())
+	pumpModel(t, m, m.submit("hi"))
+	got := m.View()
+	if !strings.Contains(got, "refreshed") {
+		t.Fatalf("status not refreshed after ReplyEnd:\n%s", got)
+	}
+}
+
+func TestStatusLineRefreshesOnModelSwitch(t *testing.T) {
+	ctrl := &fakeControl{
+		model:    "gpt-4o",
+		slConfig: &settings.StatusLineConfig{Type: "command", Command: "echo switched"},
+	}
+	m := newModel(ctrl, testCfg())
+	cmd, ok := m.maybeSlash("/model gpt-4o-mini")
+	if !ok || cmd == nil {
+		t.Fatalf("maybeSlash /model: (%v, %v)", cmd, ok)
+	}
+	pumpModel(t, m, cmd)
+	got := m.View()
+	if !strings.Contains(got, "switched") {
+		t.Fatalf("status not refreshed on /model switch:\n%s", got)
+	}
+	if !strings.Contains(got, "switched to gpt-4o-mini") {
+		t.Fatalf("scrollback missing switch message:\n%s", got)
+	}
+}

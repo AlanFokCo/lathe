@@ -140,13 +140,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if _, end := msg.ev.(event.ReplyEnd); end {
 			m.state = stateIdle
 			m.cancel = nil
-			return m, nil
+			return m, m.scheduleStatusLine()
 		}
 		return m, waitForEvent(m.eventCh)
 	case streamEndMsg:
 		m.state = stateIdle
 		m.cancel = nil
-		return m, nil
+		return m, m.scheduleStatusLine()
 	case statusLineMsg:
 		if msg.gen == m.slGen {
 			m.statusLineText = msg.text
@@ -260,8 +260,7 @@ func (m *model) maybeSlash(input string) (tea.Cmd, bool) {
 		}
 		return nil, true
 	case "model":
-		m.handleModel(rest)
-		return nil, true
+		return m.handleModel(rest), true
 	case "config":
 		m.sb.appendUser(configString(m.cfg))
 		return nil, true
@@ -271,7 +270,7 @@ func (m *model) maybeSlash(input string) (tea.Cmd, bool) {
 	}
 }
 
-func (m *model) handleModel(rest string) {
+func (m *model) handleModel(rest string) tea.Cmd {
 	if rest == "" {
 		cur := m.engine.ModelName()
 		var b strings.Builder
@@ -284,13 +283,14 @@ func (m *model) handleModel(rest string) {
 			b.WriteString(mark + name + "\n")
 		}
 		m.sb.appendUser(b.String())
-		return
+		return nil
 	}
 	if err := m.engine.SetModel(rest); err != nil {
 		m.sb.appendUser("/model " + rest + ": " + err.Error())
-		return
+		return nil
 	}
 	m.sb.appendUser("/model: switched to " + rest)
+	return m.scheduleStatusLine()
 }
 
 func configString(cfg *config.Config) string {
