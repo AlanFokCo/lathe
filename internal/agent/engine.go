@@ -20,6 +20,10 @@ func (e *Engine) Run(ctx context.Context, prompt string) <-chan event.Event {
 
 func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Event) {
 	defer close(ch)
+	// M4c: UserPromptSubmit hook (inject context into the prompt).
+	if r, _ := e.hookRunner.Run(ctx, "UserPromptSubmit", map[string]any{"prompt": prompt}); r.Context != "" {
+		prompt = prompt + "\n\n" + r.Context
+	}
 	e.appendConv(message.UserMsg(e.name, prompt))
 	tools := e.toolkit.GetToolSchemas()
 
@@ -66,17 +70,24 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 		e.appendConv(message.AssistantMsg(e.name, blocks))
 
 		if len(toolCalls) == 0 {
-			emitEvent(ctx, ch, event.ReplyEnd{Reason: "end_turn"})
+			e.finishTurn(ctx, ch, "end_turn")
 			return
 		}
 
 		results := dispatch(ctx, toolCalls, e.toolkit, e.permEng, e.interactive, e.approvalCh,
-			func(ev event.Event) { emitEvent(ctx, ch, ev) })
+			func(ev event.Event) { emitEvent(ctx, ch, ev) }, e.hookRunner)
 		// tool results go in an assistant-role message (agentscope-go convention;
 		// formatters translate to each provider's wire format).
 		e.appendConv(message.AssistantMsg(e.name, toolResultsToBlocks(results)))
 	}
-	emitEvent(ctx, ch, event.ReplyEnd{Reason: "max_iters"})
+	e.finishTurn(ctx, ch, "max_iters")
+}
+
+// finishTurn fires the Stop hook (fire-and-forget) then emits ReplyEnd.
+// cancelled/error exits do not fire Stop (interrupted/exceptional paths).
+func (e *Engine) finishTurn(ctx context.Context, ch chan<- event.Event, reason string) {
+	e.hookRunner.Run(ctx, "Stop", map[string]any{"reason": reason})
+	emitEvent(ctx, ch, event.ReplyEnd{Reason: reason})
 }
 
 // appendConv appends a message to e.conv and persists it to the session (if any).

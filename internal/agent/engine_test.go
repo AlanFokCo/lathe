@@ -15,7 +15,9 @@ import (
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/skill"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/event"
+	"github.com/alanfokco/lathe/internal/hooks"
 	"github.com/alanfokco/lathe/internal/session"
+	"github.com/alanfokco/lathe/internal/settings"
 )
 
 func drain(ch <-chan event.Event) []event.Event {
@@ -291,5 +293,47 @@ func TestEngineCloseCallsClients(t *testing.T) {
 	}
 	if err := eng.Close(); err != nil { // idempotent
 		t.Fatalf("second close: %v", err)
+	}
+}
+
+func TestEngineUserPromptSubmitHookInjectsContext(t *testing.T) {
+	m := &recordingModel{turns: [][]model.ChatResponse{
+		{textChunk("ok"), finalChunk(&model.ChatUsage{})},
+	}}
+	eng := newEngineForTest(m, tool.NewToolkit(), bypassEngine(), 10)
+	eng.hookRunner = hooks.NewRunner(map[string][]settings.Matcher{
+		"UserPromptSubmit": {{Hooks: []settings.Command{{Type: "command", Command: `printf '{"additionalContext":"CTX"}'`}}}},
+	}, "/tmp", "")
+	for range eng.Run(context.Background(), "hello") {
+	}
+	if len(m.calls) != 1 {
+		t.Fatalf("calls: %d", len(m.calls))
+	}
+	blob := ""
+	for _, mm := range m.calls[0] {
+		blob += string(mm.Role) + ":"
+		if txt := mm.GetTextContent(" "); txt != nil {
+			blob += *txt
+		}
+		blob += "\n"
+	}
+	if !strings.Contains(blob, "hello") || !strings.Contains(blob, "CTX") {
+		t.Fatalf("user msg missing prompt/context: %s", blob)
+	}
+}
+
+func TestEngineStopHookNoCrash(t *testing.T) {
+	m := &fakeModel{turns: [][]model.ChatResponse{
+		{textChunk("done"), finalChunk(&model.ChatUsage{})},
+	}}
+	eng := newEngineForTest(m, tool.NewToolkit(), bypassEngine(), 10)
+	eng.hookRunner = hooks.NewRunner(map[string][]settings.Matcher{
+		"Stop": {{Hooks: []settings.Command{{Type: "command", Command: "true"}}}},
+	}, "/tmp", "")
+	evs := drain(eng.Run(context.Background(), "hi"))
+	last := evs[len(evs)-1]
+	re, ok := last.(event.ReplyEnd)
+	if !ok || re.Reason != "end_turn" {
+		t.Fatalf("last event: %+v", last)
 	}
 }

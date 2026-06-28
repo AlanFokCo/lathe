@@ -201,3 +201,39 @@ func TestNewEngineNoMCPWhenAbsent(t *testing.T) {
 		t.Fatal("no MCP tool expected when .mcp.json absent")
 	}
 }
+
+func writeSettingsFile(t *testing.T, path string, doc map[string]any) {
+	t.Helper()
+	b, _ := json.Marshal(doc)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNewEngineWiresHookSettings(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "proj")
+	mustMkdir(t, work)
+	writeSettingsFile(t, filepath.Join(work, ".lathe", "settings.json"), map[string]any{"hooks": map[string]any{
+		"PreToolUse": []any{map[string]any{"matcher": "Bash", "hooks": []any{map[string]any{"type": "command", "command": `printf '{"decision":"block","reason":"x"}'`}}}},
+	}})
+	t.Setenv("HOME", home)
+	t.Chdir(work)
+
+	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "bypass", MaxIters: 10}
+	eng, err := NewEngine(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	if eng.hookRunner == nil {
+		t.Fatal("hookRunner not set")
+	}
+	r, _ := eng.hookRunner.Run(context.Background(), "PreToolUse", map[string]any{"tool_name": "Bash"})
+	if !r.Block || r.Reason != "x" {
+		t.Fatalf("runner not wired from settings: %+v", r)
+	}
+}

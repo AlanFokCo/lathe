@@ -13,9 +13,11 @@ import (
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/skill"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/config"
+	"github.com/alanfokco/lathe/internal/hooks"
 	"github.com/alanfokco/lathe/internal/mcpconfig"
 	"github.com/alanfokco/lathe/internal/skills"
 	"github.com/alanfokco/lathe/internal/session"
+	"github.com/alanfokco/lathe/internal/settings"
 )
 
 // Engine is lathe's turn engine. It is NOT a wrapper around UnifiedAgent;
@@ -33,6 +35,7 @@ type Engine struct {
 	interactive bool
 	approvalCh  chan string
 	mcpClients  []mcp.Client
+	hookRunner  *hooks.Runner
 }
 
 // NewEngine assembles an Engine from a resolved config (production path:
@@ -66,6 +69,14 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		fmt.Fprintln(os.Stderr, "mcp:", w)
 	}
 
+	// M4c: load settings + build hook runner (settings.json hooks).
+	settingsCfg, serr := settings.Load(cwd)
+	if serr != nil {
+		fmt.Fprintln(os.Stderr, "settings:", serr)
+		settingsCfg = &settings.Settings{Hooks: map[string][]settings.Matcher{}}
+	}
+	hookRunner := hooks.NewRunner(settingsCfg.Hooks, cwd, "")
+
 	// resume an existing session?
 	if cfg.Resume != "" {
 		sess, conv, err := session.Load(cfg.Resume)
@@ -75,7 +86,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		return &Engine{
 			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
-			conv: conv, session: sess, mcpClients: mcpClients,
+			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner,
 		}, nil
 	}
 	if cfg.Continue {
@@ -86,7 +97,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		return &Engine{
 			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
-			conv: conv, session: sess, mcpClients: mcpClients,
+			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner,
 		}, nil
 	}
 
@@ -99,7 +110,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	e := &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 		maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
-		session: sess, approvalCh: make(chan string, 1), mcpClients: mcpClients,
+		session: sess, approvalCh: make(chan string, 1), mcpClients: mcpClients, hookRunner: hookRunner,
 	}
 	if sess != nil {
 		_ = sess.SaveMeta()
