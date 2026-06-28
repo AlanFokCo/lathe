@@ -104,3 +104,62 @@ func TestWriteTool(t *testing.T) {
 		t.Fatalf("file not written: %q", ws.files["out.txt"])
 	}
 }
+
+func TestEditTool(t *testing.T) {
+	ws := newMockWorkspace()
+	ws.files["f.txt"] = []byte("hello world")
+	tk := WorkspaceToolkit(ws)
+	resp, err := tk.Get("Edit").Execute(context.Background(), map[string]any{"path": "f.txt", "old_string": "hello", "new_string": "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := extractText(resp); got != "ok" {
+		t.Fatalf("edit output: %q", got)
+	}
+	if string(ws.files["f.txt"]) != "hi world" {
+		t.Fatalf("file not edited: %q", ws.files["f.txt"])
+	}
+	// old_string not found → error in ToolResponse
+	resp, _ = tk.Get("Edit").Execute(context.Background(), map[string]any{"path": "f.txt", "old_string": "nope", "new_string": "x"})
+	if got := extractText(resp); !strings.Contains(got, "not found") {
+		t.Fatalf("want not-found error, got %q", got)
+	}
+	// ambiguous → error
+	ws.files["a.txt"] = []byte("x x")
+	resp, _ = tk.Get("Edit").Execute(context.Background(), map[string]any{"path": "a.txt", "old_string": "x", "new_string": "y"})
+	if got := extractText(resp); !strings.Contains(got, "times") {
+		t.Fatalf("want ambiguous error, got %q", got)
+	}
+}
+
+func TestGlobTool(t *testing.T) {
+	ws := newMockWorkspace()
+	ws.execResult = workspace.ExecResult{Stdout: "/ws/a.go\n/ws/b.go\n"}
+	tk := WorkspaceToolkit(ws)
+	resp, err := tk.Get("Glob").Execute(context.Background(), map[string]any{"pattern": "*.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := extractText(resp); !strings.Contains(got, "a.go") {
+		t.Fatalf("glob output: %q", got)
+	}
+	if len(ws.execCmds) != 1 || !strings.Contains(ws.execCmds[0], "find") || !strings.Contains(ws.execCmds[0], "*.go") {
+		t.Fatalf("exec command: %v", ws.execCmds)
+	}
+}
+
+func TestGrepTool(t *testing.T) {
+	ws := newMockWorkspace()
+	ws.execResult = workspace.ExecResult{Stdout: "/ws/a.go:1:foo\n"}
+	tk := WorkspaceToolkit(ws)
+	resp, err := tk.Get("Grep").Execute(context.Background(), map[string]any{"pattern": "foo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := extractText(resp); !strings.Contains(got, "foo") {
+		t.Fatalf("grep output: %q", got)
+	}
+	if len(ws.execCmds) != 1 || !strings.Contains(ws.execCmds[0], "grep") {
+		t.Fatalf("exec command: %v", ws.execCmds)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/workspace"
@@ -20,6 +21,9 @@ func WorkspaceToolkit(ws workspace.Workspace) *tool.Toolkit {
 		bashTool(ws),
 		readTool(ws),
 		writeTool(ws),
+		editTool(ws),
+		globTool(ws),
+		grepTool(ws),
 	)
 }
 
@@ -77,4 +81,82 @@ func writeTool(ws workspace.Workspace) tool.Tool {
 			return "ok", nil
 		},
 	)
+}
+
+func editTool(ws workspace.Workspace) tool.Tool {
+	return tool.NewFunctionTool("Edit", "Edit a file by replacing old_string with new_string (must be unique).",
+		json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"}},"required":["path","old_string","new_string"]}`),
+		func(ctx context.Context, input map[string]any) (any, error) {
+			path, _ := input["path"].(string)
+			oldS, _ := input["old_string"].(string)
+			newS, _ := input["new_string"].(string)
+			if path == "" || oldS == "" {
+				return nil, fmt.Errorf("path and old_string are required")
+			}
+			data, err := ws.ReadFile(ctx, path)
+			if err != nil {
+				return nil, err
+			}
+			content := string(data)
+			count := strings.Count(content, oldS)
+			if count == 0 {
+				return nil, fmt.Errorf("old_string not found in %s", path)
+			}
+			if count > 1 {
+				return nil, fmt.Errorf("old_string appears %d times in %s (must be unique)", count, path)
+			}
+			newContent := strings.Replace(content, oldS, newS, 1)
+			if err := ws.WriteFile(ctx, path, []byte(newContent)); err != nil {
+				return nil, err
+			}
+			return "ok", nil
+		},
+	)
+}
+
+func globTool(ws workspace.Workspace) tool.Tool {
+	return tool.NewFunctionTool("Glob", "Find files matching a glob pattern.",
+		json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]}`),
+		func(ctx context.Context, input map[string]any) (any, error) {
+			pattern, _ := input["pattern"].(string)
+			if pattern == "" {
+				return nil, fmt.Errorf("pattern is required")
+			}
+			cmd := fmt.Sprintf("find %s -type f -name '%s'", ws.BasePath(), shellQuote(pattern))
+			res, err := ws.Execute(ctx, cmd)
+			if err != nil {
+				return nil, err
+			}
+			return res.Stdout, nil
+		},
+	)
+}
+
+func grepTool(ws workspace.Workspace) tool.Tool {
+	return tool.NewFunctionTool("Grep", "Search file contents for a pattern.",
+		json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"]}`),
+		func(ctx context.Context, input map[string]any) (any, error) {
+			pattern, _ := input["pattern"].(string)
+			path, _ := input["path"].(string)
+			if pattern == "" {
+				return nil, fmt.Errorf("pattern is required")
+			}
+			if path == "" {
+				path = ws.BasePath()
+			}
+			cmd := fmt.Sprintf("grep -rn '%s' '%s'", shellQuote(pattern), shellQuote(path))
+			res, err := ws.Execute(ctx, cmd)
+			if err != nil {
+				return nil, err
+			}
+			return res.Stdout, nil
+		},
+	)
+}
+
+// shellQuote escapes a string for safe single-quote wrapping in a shell
+// command (replaces ' with '\''). Within a sandbox the model already has
+// arbitrary shell via Bash, so this is for correctness, not security.
+func shellQuote(s string) string {
+	return strings.ReplaceAll(s, "'", "'\\''")
 }
