@@ -65,3 +65,24 @@ func TestLoadResumeContinuePassThrough(t *testing.T) {
 		t.Fatal("continue not set")
 	}
 }
+
+func TestLoadSandboxPassThrough(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("DASHSCOPE_API_KEY", "")
+	t.Setenv("E2B_API_KEY", "")
+	cfg, err := Load(Flags{Provider: "openai", APIKey: "k", Sandbox: "docker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Sandbox != "docker" {
+		t.Fatalf("sandbox: %q", cfg.Sandbox)
+	}
+	cfg2, err := Load(Flags{Provider: "openai", APIKey: "k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg2.Sandbox != "" {
+		t.Fatalf("default sandbox should be empty: %q", cfg2.Sandbox)
+	}
+}

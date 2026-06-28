@@ -30,11 +30,12 @@ type Config struct {
 	Prompt     string
 	Resume     string
 	Continue   bool
+	Sandbox    string // "" | docker | e2b
 }
 
 // Flags holds CLI overrides; empty fields are unset.
 type Flags struct {
-	Provider, Model, APIKey, BaseURL, Permission, Output, Prompt string
+	Provider, Model, APIKey, BaseURL, Permission, Output, Prompt, Sandbox string
 	MaxIters int
 	Resume   string
 	Continue bool
@@ -49,6 +50,7 @@ func Load(f Flags) (*Config, error) {
 		Prompt:     f.Prompt,
 		Resume:     f.Resume,
 		Continue:   f.Continue,
+		Sandbox:    f.Sandbox,
 	}
 	if f.Permission != "" {
 		cfg.Permission = f.Permission

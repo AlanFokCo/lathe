@@ -17,6 +17,7 @@ func newRootCmd() *cobra.Command {
 	var maxIters int
 	var resumeID string
 	var doContinue bool
+	var sandbox string
 
 	root := &cobra.Command{
 		Use:     "lathe",
@@ -33,12 +34,13 @@ func newRootCmd() *cobra.Command {
 	root.Flags().IntVar(&maxIters, "max-iters", 50, "max agent iterations")
 	root.Flags().StringVar(&resumeID, "resume", "", "resume session <id>")
 	root.Flags().BoolVar(&doContinue, "continue", false, "continue most recent session in cwd")
+	root.Flags().StringVar(&sandbox, "sandbox", "", "none|docker|e2b (default none = local execution)")
 
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load(config.Flags{
 			Provider: provider, Model: model, APIKey: apiKey, BaseURL: baseURL,
 			Permission: permissionMode, Output: output, MaxIters: maxIters, Prompt: prompt,
-			Resume: resumeID, Continue: doContinue,
+			Resume: resumeID, Continue: doContinue, Sandbox: sandbox,
 		})
 		if err != nil {
 			return err
