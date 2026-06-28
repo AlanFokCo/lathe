@@ -337,3 +337,31 @@ func TestEngineStopHookNoCrash(t *testing.T) {
 		t.Fatalf("last event: %+v", last)
 	}
 }
+
+// TestEngineToolResultAppendedAsUserRole guards the live-found bug where tool
+// results were appended as assistant-role, making them invisible to Anthropic
+// (which requires tool_result in a user message). The 2nd ChatStream call must
+// see a user-role message carrying tool_result blocks.
+func TestEngineToolResultAppendedAsUserRole(t *testing.T) {
+	m := &recordingModel{turns: [][]model.ChatResponse{
+		{finalChunk(&model.ChatUsage{}, toolCallBlock("t1", "echo", `{"msg":"hi"}`))},
+		{textChunk("done"), finalChunk(&model.ChatUsage{})},
+	}}
+	eng := newEngineForTest(m, echoToolkit(), bypassEngine(), 10)
+	for range eng.Run(context.Background(), "call echo") {
+	}
+	if len(m.calls) != 2 {
+		t.Fatalf("ChatStream calls: %d", len(m.calls))
+	}
+	var sawUserRoleToolResult bool
+	var roles []string
+	for _, mm := range m.calls[1] {
+		roles = append(roles, string(mm.Role))
+		if string(mm.Role) == "user" && mm.HasContentBlocks(message.ContentBlockToolResult) {
+			sawUserRoleToolResult = true
+		}
+	}
+	if !sawUserRoleToolResult {
+		t.Fatalf("no user-role tool_result message in 2nd ChatStream call; roles=%v", roles)
+	}
+}

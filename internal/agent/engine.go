@@ -76,9 +76,12 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 
 		results := dispatch(ctx, toolCalls, e.toolkit, e.permEng, e.interactive, e.approvalCh,
 			func(ev event.Event) { emitEvent(ctx, ch, ev) }, e.hookRunner)
-		// tool results go in an assistant-role message (agentscope-go convention;
-		// formatters translate to each provider's wire format).
-		e.appendConv(message.AssistantMsg(e.name, toolResultsToBlocks(results)))
+		// tool results go in a USER-role message. Anthropic requires tool_result
+		// blocks in a user message (an assistant-role tool_result is invisible to
+		// the model → it loops, "stdout wasn't returned"). OpenAI/DashScope
+		// formatters override the role to "tool" when a ToolResultBlock is present,
+		// so they are unaffected by this role choice.
+		e.appendConv(message.NewMsg(e.name, message.RoleUser, toolResultsToBlocks(results)))
 	}
 	e.finishTurn(ctx, ch, "max_iters")
 }
