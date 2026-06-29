@@ -12,6 +12,7 @@ func TestEventKinds(t *testing.T) {
 		{ToolResult{ID: "t1", Name: "Read", Output: "ok", State: "success"}, "tool_result"},
 		{Usage{InputTokens: 3, OutputTokens: 2, Model: "gpt-4o"}, "usage"},
 		{ReplyEnd{Reason: "end_turn"}, "reply_end"},
+		{TurnStep{Iter: 1, MaxIters: 50}, "turn_step"},
 	}
 	for _, c := range cases {
 		if c.ev.Kind() != c.want {

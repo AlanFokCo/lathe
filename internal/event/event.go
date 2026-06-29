@@ -58,3 +58,12 @@ type RequireApproval struct {
 }
 
 func (RequireApproval) Kind() string { return "require_approval" }
+
+// TurnStep signals the start of one engine turn-loop iteration (M5c-1).
+// Iter is 1-based; MaxIters is the engine's iteration cap.
+type TurnStep struct {
+	Iter     int
+	MaxIters int
+}
+
+func (TurnStep) Kind() string { return "turn_step" }
