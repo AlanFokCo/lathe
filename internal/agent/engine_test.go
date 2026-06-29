@@ -47,9 +47,12 @@ func TestEnginePureTextTurn(t *testing.T) {
 	}}
 	eng := newEngineForTest(m, tool.NewToolkit(), bypassEngine(), 10)
 	evs := drain(eng.Run(context.Background(), "hi"))
-	// expect: TextDelta, TextDelta, Usage, ReplyEnd{end_turn}
-	if len(evs) != 4 {
+	// expect: TurnStep, TextDelta, TextDelta, Usage, ReplyEnd{end_turn}
+	if len(evs) != 5 {
 		t.Fatalf("events: %+v", evs)
+	}
+	if _, ok := evs[0].(event.TurnStep); !ok {
+		t.Fatalf("first event not TurnStep: %+v", evs[0])
 	}
 	last := evs[len(evs)-1]
 	if re, ok := last.(event.ReplyEnd); !ok || re.Reason != "end_turn" {

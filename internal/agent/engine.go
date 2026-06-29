@@ -32,6 +32,7 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 			emitEvent(ctx, ch, event.ReplyEnd{Reason: "cancelled"})
 			return
 		}
+		emitEvent(ctx, ch, event.TurnStep{Iter: iter + 1, MaxIters: e.maxIters})
 		// auto-compact if the conversation exceeds the context threshold
 		if compacted, before, after, cerr := e.compressContext(ctx, false); cerr != nil {
 			emitEvent(ctx, ch, event.ErrorEvent{Err: cerr})
