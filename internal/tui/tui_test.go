@@ -8,6 +8,7 @@ import (
 	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/event"
 	"github.com/alanfokco/lathe/internal/settings"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -154,12 +155,23 @@ func TestModelSlashConfigRedactsKey(t *testing.T) {
 
 // pumpModel drives the model by executing the returned Cmd chain (like bubbletea
 // would): cmd() → Msg → Update(Msg) → next Cmd, until a Cmd returns nil.
+//
+// A tea.BatchMsg is unfolded by following its first sub-cmd (the event pump).
+// Concurrent sub-cmds (e.g. the spinner tick from submit) are ignored here —
+// the real bubbletea runtime runs them concurrently; this helper is single-chain.
 func pumpModel(t *testing.T, m *model, cmd tea.Cmd) {
 	t.Helper()
 	for cmd != nil {
 		msg := cmd()
 		if msg == nil {
 			break
+		}
+		if b, ok := msg.(tea.BatchMsg); ok {
+			if len(b) == 0 {
+				break
+			}
+			cmd = b[0]
+			continue
 		}
 		var c tea.Cmd
 		_, c = m.Update(msg)
@@ -314,5 +326,47 @@ func TestStatusLineRefreshesOnModelSwitch(t *testing.T) {
 	}
 	if !strings.Contains(got, "switched to gpt-4o-mini") {
 		t.Fatalf("scrollback missing switch message:\n%s", got)
+	}
+}
+
+func TestActivityLineThinking(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.state = stateRunning
+	m.handleEvent(event.TurnStep{Iter: 2, MaxIters: 50})
+	got := m.View()
+	if !strings.Contains(got, "thinking") || !strings.Contains(got, "step 2/50") {
+		t.Fatalf("activity line missing thinking/step:\n%s", got)
+	}
+}
+
+func TestActivityLineRunning(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.state = stateRunning
+	m.handleEvent(event.TurnStep{Iter: 3, MaxIters: 50})
+	m.handleEvent(event.ToolCallStart{ID: "t1", Name: "Bash", Input: `{}`})
+	got := m.View()
+	if !strings.Contains(got, "running Bash") || !strings.Contains(got, "step 3/50") {
+		t.Fatalf("activity line missing running tool:\n%s", got)
+	}
+}
+
+func TestActivityLineHiddenWhenIdle(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg()) // stateIdle
+	m.handleEvent(event.TurnStep{Iter: 1, MaxIters: 50})
+	got := m.View()
+	if strings.Contains(got, "thinking") || strings.Contains(got, "running") {
+		t.Fatalf("activity line should be hidden when idle:\n%s", got)
+	}
+}
+
+func TestSpinnerTickRunningVsIdle(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.state = stateRunning
+	if _, c := m.Update(spinner.TickMsg{}); c == nil {
+		t.Fatal("expected next tick cmd while running")
+	}
+	m.state = stateIdle
+	if _, c := m.Update(spinner.TickMsg{}); c != nil {
+		t.Fatal("expected nil cmd (stop) while idle")
 	}
 }

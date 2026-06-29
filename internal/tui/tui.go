@@ -12,6 +12,7 @@ import (
 	"github.com/alanfokco/lathe/internal/event"
 	"github.com/alanfokco/lathe/internal/settings"
 	"github.com/alanfokco/lathe/internal/statusline"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -36,6 +37,14 @@ const (
 	stateAwaitingApproval
 )
 
+type activityPhase int
+
+const (
+	phaseIdle activityPhase = iota
+	phaseThinking
+	phaseRunning
+)
+
 type model struct {
 	engine         EngineControl
 	cfg            *config.Config
@@ -50,11 +59,17 @@ type model struct {
 	pendingTool    string
 	statusLineText string
 	slGen          int
+	spinner        spinner.Model
+	phase          activityPhase
+	curTool        string
+	step           int
+	maxStep        int
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
 	ta := textarea.New()
-	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle}
+	sp := spinner.New()
+	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle, spinner: sp}
 }
 
 func (m *model) Init() tea.Cmd { return tea.Batch(m.input.Focus(), m.scheduleStatusLine()) }
@@ -66,7 +81,7 @@ func (m *model) submit(prompt string) tea.Cmd {
 	m.ctx, m.cancel = ctx, cancel
 	m.state = stateRunning
 	m.eventCh = m.engine.Run(ctx, prompt)
-	return waitForEvent(m.eventCh)
+	return tea.Batch(waitForEvent(m.eventCh), m.spinner.Tick)
 }
 
 // eventMsg wraps one engine event for the bubbletea Update loop.
@@ -146,10 +161,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamEndMsg:
 		m.state = stateIdle
 		m.cancel = nil
+		m.phase = phaseIdle
 		return m, m.scheduleStatusLine()
 	case statusLineMsg:
 		if msg.gen == m.slGen {
 			m.statusLineText = msg.text
+		}
+		return m, nil
+	case spinner.TickMsg:
+		if m.state == stateRunning || m.state == stateAwaitingApproval {
+			var c tea.Cmd
+			m.spinner, c = m.spinner.Update(msg)
+			return m, c
 		}
 		return m, nil
 	}
@@ -160,10 +183,17 @@ func (m *model) handleEvent(ev event.Event) {
 	switch e := ev.(type) {
 	case event.TextDelta:
 		m.sb.appendAssistantText(e.Delta)
+	case event.TurnStep:
+		m.phase = phaseThinking
+		m.step = e.Iter
+		m.maxStep = e.MaxIters
 	case event.ToolCallStart:
 		m.sb.appendTool(e.ID, e.Name, e.Input)
+		m.phase = phaseRunning
+		m.curTool = e.Name
 	case event.ToolResult:
 		m.sb.finishTool(e.ID, e.Output, e.State, e.Diff)
+		m.phase = phaseThinking
 	case event.Usage:
 		m.sb.appendUsage(e)
 		m.cumIn += e.InputTokens
@@ -175,6 +205,8 @@ func (m *model) handleEvent(ev event.Event) {
 	case event.RequireApproval:
 		m.pendingTool = e.ToolName
 		m.state = stateAwaitingApproval
+	case event.ReplyEnd:
+		m.phase = phaseIdle
 	}
 }
 
@@ -233,6 +265,23 @@ func (m *model) statusLine() string {
 	}
 	return fmt.Sprintf("model=%s | perm=%s | tokens in=%d out=%d",
 		m.engine.ModelName(), m.cfg.Permission, m.cumIn, m.cumOut)
+}
+
+// activityLine returns the live progress line shown while a turn runs:
+// "⠋ thinking · step N/max" or "⠋ running <tool> · step N/max". Empty when idle.
+func (m *model) activityLine() string {
+	if m.state != stateRunning {
+		return ""
+	}
+	label := "thinking"
+	if m.phase == phaseRunning {
+		label = "running " + m.curTool
+	}
+	out := m.spinner.View() + " " + label
+	if m.maxStep > 0 {
+		out += " · step " + fmt.Sprintf("%d/%d", m.step, m.maxStep)
+	}
+	return out
 }
 
 // maybeSlash handles /help /clear /quit /model /config. Returns (cmd, true) if
@@ -309,6 +358,9 @@ func (m *model) View() string {
 	scroll := m.sb.render(80)
 	if m.state == stateAwaitingApproval {
 		return scroll + "\n" + fmt.Sprintf("Approve %s? [y]es / [n]o / [a]lways (ESC=deny)", m.pendingTool) + "\n" + m.input.View()
+	}
+	if act := m.activityLine(); act != "" {
+		scroll += "\n" + act
 	}
 	return scroll + "\n" + m.statusLine() + "\n" + m.input.View()
 }
