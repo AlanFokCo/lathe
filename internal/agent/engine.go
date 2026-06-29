@@ -47,10 +47,7 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 			emitEvent(ctx, ch, event.ReplyEnd{Reason: "error"})
 			return
 		}
-		text, toolCalls, usage, deltas := accumulate(chunkCh)
-		for _, d := range deltas {
-			emitEvent(ctx, ch, d)
-		}
+		text, toolCalls, usage := accumulate(chunkCh, func(ev event.Event) { emitEvent(ctx, ch, ev) })
 		if usage != nil {
 			modelName := ""
 			if mn, ok := e.chatModel.(interface{ ModelName() string }); ok {

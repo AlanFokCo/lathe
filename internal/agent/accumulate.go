@@ -13,11 +13,15 @@ import (
 //   - tool calls: collected from all chunks, merged by ID (Input appended,
 //     so both full-block and partial-JSON-delta streaming work)
 //   - usage: from the IsLast chunk
-//   - text deltas: one event per non-last text fragment
 //
+// Each non-last text delta is emitted live via the emit callback (M5c-1),
+// so consumers see text as it arrives rather than after the stream completes.
 // Pattern follows examples/model_call/main.go: non-last chunks carry text
 // deltas; the IsLast chunk carries Usage.
-func accumulate(ch <-chan model.ChatResponse) (text string, toolCalls []message.ToolCallBlock, usage *model.ChatUsage, deltas []event.TextDelta) {
+func accumulate(
+	ch <-chan model.ChatResponse,
+	emit func(event.Event),
+) (text string, toolCalls []message.ToolCallBlock, usage *model.ChatUsage) {
 	var sb strings.Builder
 	byID := map[string]message.ToolCallBlock{}
 	var order []string
@@ -26,7 +30,7 @@ func accumulate(ch <-chan model.ChatResponse) (text string, toolCalls []message.
 			dt := resp.GetTextContent()
 			if dt != "" {
 				sb.WriteString(dt)
-				deltas = append(deltas, event.TextDelta{Delta: dt})
+				emit(event.TextDelta{Delta: dt})
 			}
 		}
 		for _, b := range resp.Content {
@@ -47,5 +51,5 @@ func accumulate(ch <-chan model.ChatResponse) (text string, toolCalls []message.
 	for _, id := range order {
 		toolCalls = append(toolCalls, byID[id])
 	}
-	return sb.String(), toolCalls, usage, deltas
+	return sb.String(), toolCalls, usage
 }

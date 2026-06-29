@@ -6,16 +6,22 @@ import (
 
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
+	"github.com/alanfokco/lathe/internal/event"
 )
 
-func TestAccumulateTextDeltasAndUsage(t *testing.T) {
+func TestAccumulateTextDeltasEmittedLive(t *testing.T) {
 	ch := make(chan model.ChatResponse, 3)
 	ch <- textChunk("Hel")
 	ch <- textChunk("lo")
 	ch <- finalChunk(&model.ChatUsage{InputTokens: 1, OutputTokens: 2})
 	close(ch)
 
-	text, tcs, usage, deltas := accumulate(ch)
+	var emitted []event.TextDelta
+	text, tcs, usage := accumulate(ch, func(ev event.Event) {
+		if d, ok := ev.(event.TextDelta); ok {
+			emitted = append(emitted, d)
+		}
+	})
 	if text != "Hello" {
 		t.Fatalf("text: got %q", text)
 	}
@@ -25,8 +31,8 @@ func TestAccumulateTextDeltasAndUsage(t *testing.T) {
 	if usage == nil || usage.OutputTokens != 2 {
 		t.Fatalf("usage: %v", usage)
 	}
-	if len(deltas) != 2 || deltas[0].Delta != "Hel" || deltas[1].Delta != "lo" {
-		t.Fatalf("deltas: %+v", deltas)
+	if len(emitted) != 2 || emitted[0].Delta != "Hel" || emitted[1].Delta != "lo" {
+		t.Fatalf("emitted deltas (want live, in-order): %+v", emitted)
 	}
 }
 
@@ -38,7 +44,7 @@ func TestAccumulateToolCallMergedByID(t *testing.T) {
 	ch <- finalChunk(&model.ChatUsage{})
 	close(ch)
 
-	text, tcs, usage, _ := accumulate(ch)
+	text, tcs, usage := accumulate(ch, func(event.Event) {})
 	if text != "" {
 		t.Fatalf("text: got %q", text)
 	}
