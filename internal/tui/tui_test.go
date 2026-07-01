@@ -249,8 +249,37 @@ func TestStatusLineFallback(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
 	m.handleEvent(event.Usage{InputTokens: 7, OutputTokens: 3, Model: "gpt-4o"})
 	got := m.View()
-	if !strings.Contains(got, "model=gpt-4o") || !strings.Contains(got, "in=7 out=3") {
+	if !strings.Contains(got, "gpt-4o") || !strings.Contains(got, "in=7 out=3") {
 		t.Fatalf("fallback status missing:\n%s", got)
+	}
+	if strings.Contains(got, "model=") {
+		t.Fatalf("old model= label should be gone:\n%s", got)
+	}
+}
+
+func TestWidthFromWindowSizeMsg(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	if m.wrapWidth() != 80 {
+		t.Fatalf("default wrapWidth: %d", m.wrapWidth())
+	}
+	m.Update(tea.WindowSizeMsg{Width: 120})
+	if m.width != 120 || m.wrapWidth() != 120 {
+		t.Fatalf("after WindowSizeMsg: width=%d wrap=%d", m.width, m.wrapWidth())
+	}
+}
+
+func TestTickFormatsPendingMarkdown(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.state = stateRunning
+	m.handleEvent(event.TextDelta{Delta: "**hi**"})
+	if !strings.Contains(m.sb.render(80), "**hi**") {
+		t.Fatalf("pre-format should show raw: %q", m.sb.render(80))
+	}
+	if _, c := m.Update(spinner.TickMsg{}); c == nil {
+		t.Fatal("expected next tick cmd while running")
+	}
+	if strings.Contains(m.sb.render(80), "**") {
+		t.Fatalf("post-tick should be formatted (no **): %q", m.sb.render(80))
 	}
 }
 

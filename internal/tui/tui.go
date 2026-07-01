@@ -64,12 +64,24 @@ type model struct {
 	curTool        string
 	step           int
 	maxStep        int
+	width          int
+	cwd            string
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
 	ta := textarea.New()
 	sp := spinner.New()
-	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle, spinner: sp}
+	cwd, _, _, _ := engine.StatusInfo()
+	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle, spinner: sp, cwd: cwd}
+}
+
+// wrapWidth returns the terminal width for wrapping/glamour, defaulting to 80
+// before the first tea.WindowSizeMsg arrives.
+func (m *model) wrapWidth() int {
+	if m.width > 0 {
+		return m.width
+	}
+	return 80
 }
 
 func (m *model) Init() tea.Cmd { return tea.Batch(m.input.Focus(), m.scheduleStatusLine()) }
@@ -103,6 +115,7 @@ func waitForEvent(ch <-chan event.Event) tea.Cmd {
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.width = msg.Width
 		return m, nil
 	case tea.KeyMsg:
 		if m.state == stateAwaitingApproval {
@@ -153,12 +166,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eventMsg:
 		m.handleEvent(msg.ev)
 		if _, end := msg.ev.(event.ReplyEnd); end {
+			m.sb.formatPending(m.wrapWidth())
 			m.state = stateIdle
 			m.cancel = nil
 			return m, m.scheduleStatusLine()
 		}
 		return m, waitForEvent(m.eventCh)
 	case streamEndMsg:
+		m.sb.formatPending(m.wrapWidth())
 		m.state = stateIdle
 		m.cancel = nil
 		m.phase = phaseIdle
@@ -170,6 +185,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case spinner.TickMsg:
 		if m.state == stateRunning || m.state == stateAwaitingApproval {
+			m.sb.formatPending(m.wrapWidth())
 			var c tea.Cmd
 			m.spinner, c = m.spinner.Update(msg)
 			return m, c
@@ -263,8 +279,12 @@ func (m *model) statusLine() string {
 		}
 		return m.statusLineText
 	}
-	return fmt.Sprintf("model=%s | perm=%s | tokens in=%d out=%d",
-		m.engine.ModelName(), m.cfg.Permission, m.cumIn, m.cumOut)
+	parts := []string{m.engine.ModelName()}
+	if m.cwd != "" {
+		parts = append(parts, m.cwd)
+	}
+	parts = append(parts, fmt.Sprintf("in=%d out=%d", m.cumIn, m.cumOut))
+	return strings.Join(parts, " · ")
 }
 
 // activityLine returns the live progress line shown while a turn runs:
@@ -355,12 +375,12 @@ func redactKey(k string) string {
 }
 
 func (m *model) View() string {
-	scroll := m.sb.render(80)
+	scroll := m.sb.render(m.wrapWidth())
 	if m.state == stateAwaitingApproval {
 		return scroll + "\n" + fmt.Sprintf("Approve %s? [y]es / [n]o / [a]lways (ESC=deny)", m.pendingTool) + "\n" + m.input.View()
 	}
 	if act := m.activityLine(); act != "" {
 		scroll += "\n" + act
 	}
-	return scroll + "\n" + m.statusLine() + "\n" + m.input.View()
+	return scroll + "\n" + m.statusLine() + "\n" + promptStyle.Render("> ") + m.input.View()
 }
