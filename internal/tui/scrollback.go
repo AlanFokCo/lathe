@@ -27,6 +27,8 @@ type block struct {
 	toolState string
 	diff      string
 	done      bool
+	formatted string // M5c-2: cached glamour output for assistant blocks
+	dirty     bool   // M5c-2: text changed, formatted is stale
 }
 
 type scrollback struct {
@@ -41,11 +43,31 @@ func (s *scrollback) appendUser(prompt string) {
 
 func (s *scrollback) appendAssistantText(delta string) {
 	if s.lastAssistant >= 0 && s.lastAssistant < len(s.blocks) && s.blocks[s.lastAssistant].kind == kindAssistant {
-		s.blocks[s.lastAssistant].text += delta
+		b := &s.blocks[s.lastAssistant]
+		b.text += delta
+		b.dirty = true
+		b.formatted = ""
 		return
 	}
-	s.blocks = append(s.blocks, block{kind: kindAssistant, text: delta})
+	s.blocks = append(s.blocks, block{kind: kindAssistant, text: delta, dirty: true})
 	s.lastAssistant = len(s.blocks) - 1
+}
+
+// formatPending re-renders the last assistant block if its text changed since
+// the last format (M5c-2). Called on the spinner tick (~10fps) for live
+// Markdown, and once at turn end for the final state. Cheap for completed
+// (cached) blocks.
+func (s *scrollback) formatPending(width int) {
+	for i := len(s.blocks) - 1; i >= 0; i-- {
+		if s.blocks[i].kind == kindAssistant {
+			b := &s.blocks[i]
+			if b.dirty {
+				b.formatted = RenderMarkdown(b.text, width)
+				b.dirty = false
+			}
+			return
+		}
+	}
 }
 
 func (s *scrollback) appendTool(id, name, input string) {

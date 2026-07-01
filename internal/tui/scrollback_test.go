@@ -32,3 +32,18 @@ func TestScrollbackClear(t *testing.T) {
 		t.Fatalf("expected empty after clear, got %q", got)
 	}
 }
+
+func TestFormatPendingRendersDirtyBlock(t *testing.T) {
+	var s scrollback
+	s.appendAssistantText("**hi**")
+	if !s.blocks[0].dirty || s.blocks[0].formatted != "" {
+		t.Fatalf("expected dirty + empty formatted: %+v", s.blocks[0])
+	}
+	s.formatPending(80)
+	if s.blocks[0].dirty || s.blocks[0].formatted == "" {
+		t.Fatalf("expected clean + formatted set: %+v", s.blocks[0])
+	}
+	if strings.Contains(s.blocks[0].formatted, "**") {
+		t.Fatalf("formatted still has **: %q", s.blocks[0].formatted)
+	}
+}
