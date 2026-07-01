@@ -14,10 +14,9 @@ func TestScrollbackRendersTextAndTool(t *testing.T) {
 	sb.appendAssistantText("lo")
 	sb.appendTool("t1", "Read", `{"path":"x"}`)
 	sb.finishTool("t1", "contents of x", "success", "")
-	sb.appendUsage(event.Usage{InputTokens: 1, OutputTokens: 2, Model: "gpt-4o"})
 
 	got := sb.render(80)
-	for _, want := range []string{"do X", "Hello", "Read", "contents of x", "gpt-4o"} {
+	for _, want := range []string{"do X", "Hello", "Read", "contents of x", "●"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("render missing %q:\n%s", want, got)
 		}
@@ -45,5 +44,36 @@ func TestFormatPendingRendersDirtyBlock(t *testing.T) {
 	}
 	if strings.Contains(s.blocks[0].formatted, "**") {
 		t.Fatalf("formatted still has **: %q", s.blocks[0].formatted)
+	}
+}
+
+func TestRenderShowsFormatted(t *testing.T) {
+	var sb scrollback
+	sb.appendAssistantText("**hi**")
+	sb.formatPending(80)
+	got := sb.render(80)
+	if strings.Contains(got, "**") {
+		t.Fatalf("render should show formatted (no **):\n%s", got)
+	}
+	if !strings.Contains(got, "hi") {
+		t.Fatalf("render lost text:\n%s", got)
+	}
+}
+
+func TestToolBlockStyled(t *testing.T) {
+	var sb scrollback
+	sb.appendTool("t1", "Bash", `{"command":"ls"}`)
+	sb.finishTool("t1", "done", "success", "")
+	got := sb.render(80)
+	if !strings.Contains(got, "● Bash") || !strings.Contains(got, "✓") || !strings.Contains(got, "done") {
+		t.Fatalf("tool block styling missing:\n%s", got)
+	}
+}
+
+func TestUsageBlockRemoved(t *testing.T) {
+	var sb scrollback
+	sb.appendUsage(event.Usage{InputTokens: 1, OutputTokens: 2, Model: "gpt-4o"})
+	if got := sb.render(80); strings.Contains(got, "gpt-4o") || strings.Contains(got, "[tokens") {
+		t.Fatalf("usage block should not render:\n%s", got)
 	}
 }

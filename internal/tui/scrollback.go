@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/alanfokco/lathe/internal/event"
@@ -87,13 +86,10 @@ func (s *scrollback) finishTool(id, output, state, diff string) {
 	}
 }
 
-func (s *scrollback) appendUsage(u event.Usage) {
-	s.blocks = append(s.blocks, block{
-		kind: kindUsage,
-		text: fmt.Sprintf("model=%s in=%d out=%d", u.Model, u.InputTokens, u.OutputTokens),
-	})
-	s.lastAssistant = -1
-}
+// appendUsage is a no-op (M5c-2): per-call usage is noise in the scrollback;
+// cumulative tokens live in the status line. Kept as a stub so tui.handleEvent
+// callers don't need changes.
+func (s *scrollback) appendUsage(u event.Usage) {}
 
 func (s *scrollback) appendError(err error) {
 	s.blocks = append(s.blocks, block{kind: kindError, text: err.Error()})
@@ -103,36 +99,55 @@ func (s *scrollback) appendError(err error) {
 func (s *scrollback) clear() { s.blocks = nil; s.lastAssistant = 0 }
 
 var (
-	userStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	toolStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	usageStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	userStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	toolStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	successStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	warnStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	promptStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 )
 
 func (s *scrollback) render(width int) string {
+	_ = width // wrapping happens in glamour (formatPending); tool/user text is unwrapped for now
 	var b strings.Builder
-	_ = width // M2: no wrapping; width reserved for a later refinement.
-	for _, bl := range s.blocks {
+	for i := range s.blocks {
+		bl := &s.blocks[i]
 		switch bl.kind {
 		case kindUser:
 			b.WriteString(userStyle.Render("> ") + bl.text + "\n")
 		case kindAssistant:
-			b.WriteString(bl.text)
+			if bl.formatted != "" {
+				b.WriteString(bl.formatted)
+			} else {
+				b.WriteString(bl.text)
+			}
 		case kindTool:
-			b.WriteString("\n" + toolStyle.Render("⏺ "+bl.toolName+"("+strings.TrimSpace(bl.toolIn)+")"))
+			b.WriteString("\n" + toolStyle.Render("● "+bl.toolName+"("+strings.TrimSpace(bl.toolIn)+")"))
 			if bl.done {
-				b.WriteString("\n  ↳ " + strings.TrimSpace(bl.toolOut) + " [" + bl.toolState + "]\n")
+				b.WriteString("\n  ↳ " + strings.TrimSpace(bl.toolOut) + " " + stateMark(bl.toolState) + "\n")
 				if bl.diff != "" {
 					b.WriteString(bl.diff + "\n")
 				}
 			} else {
 				b.WriteString("\n")
 			}
-		case kindUsage:
-			b.WriteString(usageStyle.Render("\n[tokens "+bl.text+"]\n"))
 		case kindError:
 			b.WriteString(errorStyle.Render("\nerror: "+bl.text+"\n"))
 		}
 	}
 	return b.String()
+}
+
+// stateMark renders a colored state marker for a finished tool call.
+func stateMark(state string) string {
+	switch state {
+	case "success":
+		return successStyle.Render("[✓]")
+	case "error":
+		return errorStyle.Render("[✗]")
+	case "denied":
+		return warnStyle.Render("[⊘]")
+	default:
+		return "[" + state + "]"
+	}
 }
