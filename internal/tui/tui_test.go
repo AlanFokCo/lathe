@@ -399,3 +399,13 @@ func TestSpinnerTickRunningVsIdle(t *testing.T) {
 		t.Fatal("expected nil cmd (stop) while idle")
 	}
 }
+
+func TestInputNoVerticalPromptLine(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	if m.input.Prompt != "" {
+		t.Fatalf("textarea Prompt should be empty (no ┃ line), got %q", m.input.Prompt)
+	}
+	if m.input.ShowLineNumbers {
+		t.Fatal("textarea ShowLineNumbers should be false (no line-number gutter)")
+	}
+}

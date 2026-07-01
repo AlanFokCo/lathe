@@ -70,6 +70,9 @@ type model struct {
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
 	ta := textarea.New()
+	ta.Prompt = ""             // M5c-2: drop the default "┃ " vertical line below the input
+	ta.ShowLineNumbers = false // M5c-2: drop the line-number gutter
+	ta.SetWidth(80)
 	sp := spinner.New()
 	cwd, _, _, _ := engine.StatusInfo()
 	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle, spinner: sp, cwd: cwd}
