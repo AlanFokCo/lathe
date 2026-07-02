@@ -268,20 +268,7 @@ func TestWidthFromWindowSizeMsg(t *testing.T) {
 	}
 }
 
-func TestTickFormatsPendingMarkdown(t *testing.T) {
-	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
-	m.state = stateRunning
-	m.handleEvent(event.TextDelta{Delta: "**hi**"})
-	if !strings.Contains(m.sb.render(80), "**hi**") {
-		t.Fatalf("pre-format should show raw: %q", m.sb.render(80))
-	}
-	if _, c := m.Update(spinner.TickMsg{}); c == nil {
-		t.Fatal("expected next tick cmd while running")
-	}
-	if strings.Contains(m.sb.render(80), "**") {
-		t.Fatalf("post-tick should be formatted (no **): %q", m.sb.render(80))
-	}
-}
+// TestBuildFormatsOnBoundary is added in Task 4 (replaces TestTickFormatsPendingMarkdown).
 
 func TestStatusLineRendersCommandOutput(t *testing.T) {
 	ctrl := &fakeControl{

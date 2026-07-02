@@ -169,14 +169,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eventMsg:
 		m.handleEvent(msg.ev)
 		if _, end := msg.ev.(event.ReplyEnd); end {
-			m.sb.formatPending(m.wrapWidth())
 			m.state = stateIdle
 			m.cancel = nil
 			return m, m.scheduleStatusLine()
 		}
 		return m, waitForEvent(m.eventCh)
 	case streamEndMsg:
-		m.sb.formatPending(m.wrapWidth())
+		m.sb.finishAssistant()
 		m.state = stateIdle
 		m.cancel = nil
 		m.phase = phaseIdle
@@ -188,7 +187,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case spinner.TickMsg:
 		if m.state == stateRunning || m.state == stateAwaitingApproval {
-			m.sb.formatPending(m.wrapWidth())
 			var c tea.Cmd
 			m.spinner, c = m.spinner.Update(msg)
 			return m, c
@@ -225,6 +223,7 @@ func (m *model) handleEvent(ev event.Event) {
 		m.pendingTool = e.ToolName
 		m.state = stateAwaitingApproval
 	case event.ReplyEnd:
+		m.sb.finishAssistant()
 		m.phase = phaseIdle
 	}
 }
@@ -378,7 +377,7 @@ func redactKey(k string) string {
 }
 
 func (m *model) View() string {
-	scroll := m.sb.render(m.wrapWidth())
+	scroll := m.sb.build(m.wrapWidth(), -1)
 	if m.state == stateAwaitingApproval {
 		return scroll + "\n" + fmt.Sprintf("Approve %s? [y]es / [n]o / [a]lways (ESC=deny)", m.pendingTool) + "\n" + m.input.View()
 	}
