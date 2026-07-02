@@ -69,6 +69,7 @@ type model struct {
 	width          int
 	height         int
 	viewport       viewport.Model
+	selectedTool   int // M5d: index into sb.blocks of the highlighted tool block, -1 none
 	cwd            string
 }
 
@@ -80,7 +81,7 @@ func newModel(engine EngineControl, cfg *config.Config) *model {
 	sp := spinner.New()
 	vp := viewport.New(80, 24)
 	cwd, _, _, _ := engine.StatusInfo()
-	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle, spinner: sp, viewport: vp, cwd: cwd}
+	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle, spinner: sp, viewport: vp, selectedTool: -1, cwd: cwd}
 }
 
 // wrapWidth returns the terminal width for wrapping/glamour, defaulting to 80
@@ -109,9 +110,82 @@ func (m *model) submit(prompt string) tea.Cmd {
 // position alone (claude-code-style "don't yank back while reading history").
 func (m *model) rebuild() {
 	atBottom := m.viewport.AtBottom()
-	m.viewport.SetContent(m.sb.build(m.wrapWidth(), -1))
+	m.viewport.SetContent(m.sb.build(m.wrapWidth(), m.selectedTool))
 	if atBottom {
 		m.viewport.GotoBottom()
+	}
+}
+
+// toolBlockIndices returns sb block indices of finished tool blocks (M5d).
+func (m *model) toolBlockIndices() []int {
+	var idx []int
+	for i, b := range m.sb.blocks {
+		if b.kind == kindTool && b.done {
+			idx = append(idx, i)
+		}
+	}
+	return idx
+}
+
+// selectTool moves selection among finished tool blocks by dir (+1/-1),
+// wrapping. Defaults to the last block for ] and first for [. M5d.
+func (m *model) selectTool(dir int) {
+	idx := m.toolBlockIndices()
+	if len(idx) == 0 {
+		m.selectedTool = -1
+		return
+	}
+	pos := -1
+	for i, bi := range idx {
+		if bi == m.selectedTool {
+			pos = i
+			break
+		}
+	}
+	if pos < 0 {
+		if dir > 0 {
+			pos = len(idx) - 1
+		} else {
+			pos = 0
+		}
+	} else {
+		pos += dir
+		if pos < 0 {
+			pos = len(idx) - 1
+		} else if pos >= len(idx) {
+			pos = 0
+		}
+	}
+	m.selectedTool = idx[pos]
+	m.scrollSelectedIntoView()
+}
+
+// toggleExpand flips the expanded flag on the selected finished tool block.
+// Returns false if nothing is selected to expand. M5d.
+func (m *model) toggleExpand() bool {
+	if m.selectedTool < 0 || m.selectedTool >= len(m.sb.blocks) {
+		return false
+	}
+	b := &m.sb.blocks[m.selectedTool]
+	if b.kind != kindTool || !b.done {
+		return false
+	}
+	b.expanded = !b.expanded
+	return true
+}
+
+// scrollSelectedIntoView brings the selected block into the visible viewport
+// window using its startLine. M5d.
+func (m *model) scrollSelectedIntoView() {
+	if m.selectedTool < 0 || m.selectedTool >= len(m.sb.blocks) {
+		return
+	}
+	start := m.sb.blocks[m.selectedTool].startLine
+	vp := &m.viewport
+	if start < vp.YOffset {
+		vp.SetYOffset(start)
+	} else if start >= vp.YOffset+vp.Height {
+		vp.SetYOffset(start - vp.Height + 1)
 	}
 }
 
@@ -179,6 +253,39 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, nil
+		}
+		// M5d: viewport scroll + tool block selection/expand. These run for any
+		// non-approval state. Expand/selection keys only act when input is empty
+		// so typing into the textarea is unaffected (except 'e', which is gated
+		// on a selected tool existing).
+		switch {
+		case msg.Type == tea.KeyPgUp:
+			m.viewport.PageUp()
+			return m, nil
+		case msg.Type == tea.KeyPgDown:
+			m.viewport.PageDown()
+			return m, nil
+		case m.input.Value() == "" && msg.Type == tea.KeyEnter:
+			if m.toggleExpand() {
+				m.rebuild()
+				return m, nil
+			}
+		case m.input.Value() == "" && msg.Type == tea.KeyRunes && len(msg.Runes) == 1:
+			switch msg.Runes[0] {
+			case ']', '[':
+				dir := 1
+				if msg.Runes[0] == '[' {
+					dir = -1
+				}
+				m.selectTool(dir)
+				m.rebuild()
+				return m, nil
+			case 'e':
+				if m.selectedTool >= 0 && m.toggleExpand() {
+					m.rebuild()
+					return m, nil
+				}
+			}
 		}
 		switch {
 		case msg.Type == tea.KeyCtrlC:

@@ -472,3 +472,91 @@ func TestRebuildSticksToBottom(t *testing.T) {
 		t.Fatal("scrolled-up state should be not-at-bottom")
 	}
 }
+
+// TestToolBlockCollapsedThenExpanded — M5d: default collapsed, e/Enter expands
+// inline, full output appears in the viewport content.
+func TestToolBlockCollapsedThenExpanded(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	m.handleEvent(event.ToolCallStart{ID: "t1", Name: "Read", Input: `{"path":"x"}`})
+	m.handleEvent(event.ToolResult{ID: "t1", Output: "secret-output-line1\nline2", State: "success"})
+
+	view := m.View()
+	if strings.Contains(view, "secret-output-line1") {
+		t.Fatalf("collapsed view leaked full output:\n%s", view)
+	}
+	if !strings.Contains(view, "Read") || !strings.Contains(view, "[✓]") {
+		t.Fatalf("collapsed view missing summary:\n%s", view)
+	}
+
+	// select + expand
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}}) // select last tool
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})                      // expand (input empty)
+	view = m.View()
+	if !strings.Contains(view, "secret-output-line1") {
+		t.Fatalf("expanded view missing full output:\n%s", view)
+	}
+	// collapse again
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if strings.Contains(m.View(), "secret-output-line1") {
+		t.Fatalf("re-collapsed view leaked output:\n%s", m.View())
+	}
+}
+
+// TestSelectionCyclesThroughToolBlocks — ] then [ moves selection.
+func TestSelectionCyclesThroughToolBlocks(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	m.handleEvent(event.ToolCallStart{ID: "a", Name: "Read", Input: `{}`})
+	m.handleEvent(event.ToolResult{ID: "a", Output: "a-out", State: "success"})
+	m.handleEvent(event.ToolCallStart{ID: "b", Name: "Bash", Input: `{}`})
+	m.handleEvent(event.ToolResult{ID: "b", Output: "b-out", State: "success"})
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}}) // select last (b)
+	if m.selectedTool < 0 || m.sb.blocks[m.selectedTool].toolName != "Bash" {
+		t.Fatalf("] should select Bash, got selectedTool=%d", m.selectedTool)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}}) // prev (a)
+	if m.sb.blocks[m.selectedTool].toolName != "Read" {
+		t.Fatalf("[ should select Read, got selectedTool=%d", m.selectedTool)
+	}
+}
+
+// TestPgUpPgDownScrollsViewport — M5d: viewport scroll keys work.
+func TestPgUpPgDownScrollsViewport(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	for i := 0; i < 30; i++ {
+		m.sbAppendUser(fmt.Sprintf("line %d", i))
+	}
+	m.viewport.GotoBottom()
+	yBefore := m.viewport.YOffset
+	m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	if m.viewport.YOffset >= yBefore {
+		t.Fatalf("PgUp should scroll up: %d -> %d", yBefore, m.viewport.YOffset)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	// at least moved back down somewhat
+	if m.viewport.YOffset == 0 && yBefore != 0 {
+		t.Fatalf("PgDown should scroll down")
+	}
+}
+
+// TestExpandEGatedOnEmptyInput — typing 'e' with input non-empty goes to the
+// textarea, not expand.
+func TestExpandEGatedOnEmptyInput(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	m.handleEvent(event.ToolCallStart{ID: "a", Name: "Read", Input: `{}`})
+	m.handleEvent(event.ToolResult{ID: "a", Output: "out", State: "success"})
+	m.input.Focus() // M5d: mimic Init() focusing the textarea so typed runes land
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}}) // select
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}) // type 'x' into input
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}}) // 'e' → textarea, not expand
+	if m.input.Value() != "xe" {
+		t.Fatalf("expected input 'xe', got %q", m.input.Value())
+	}
+	if m.sb.blocks[m.selectedTool].expanded {
+		t.Fatal("e with non-empty input should NOT expand")
+	}
+}
