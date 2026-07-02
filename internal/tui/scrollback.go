@@ -140,7 +140,11 @@ func (s *scrollback) build(width, selectedTool int) string {
 func (s *scrollback) buildAssistant(bl *block, width int) string {
 	if !bl.done {
 		cl := commitLenFor(bl.text)
-		if cl > bl.commitLen || bl.fmtWidth != width {
+		// M5d: only (re-)render the committed prefix when there is one (cl > 0)
+		// and it advanced or width changed. Rendering an empty prefix would
+		// store glamour's non-empty output for "" (a blank paragraph) — wasting
+		// a line and masking the done-branch re-render below.
+		if cl > 0 && (cl > bl.commitLen || bl.fmtWidth != width) {
 			bl.committed = RenderMarkdown(bl.text[:cl], width)
 			bl.commitLen = cl
 			bl.fmtWidth = width
@@ -151,8 +155,13 @@ func (s *scrollback) buildAssistant(bl *block, width int) string {
 		}
 		return bl.committed + pending
 	}
-	if bl.committed == "" || bl.fmtWidth != width {
+	// M5d: a done block must render the FULL text. Re-render when the committed
+	// prefix doesn't cover the whole text (commitLen < len) or width changed.
+	// Don't key on committed=="" — glamour("") is non-empty, so the streaming
+	// path may have left a non-empty-but-incomplete committed cache.
+	if bl.commitLen < len(bl.text) || bl.fmtWidth != width {
 		bl.committed = RenderMarkdown(bl.text, width)
+		bl.commitLen = len(bl.text)
 		bl.fmtWidth = width
 	}
 	return bl.committed

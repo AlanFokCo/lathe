@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/event"
@@ -14,6 +15,7 @@ import (
 	"github.com/alanfokco/lathe/internal/statusline"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -65,6 +67,8 @@ type model struct {
 	step           int
 	maxStep        int
 	width          int
+	height         int
+	viewport       viewport.Model
 	cwd            string
 }
 
@@ -74,8 +78,9 @@ func newModel(engine EngineControl, cfg *config.Config) *model {
 	ta.ShowLineNumbers = false // M5c-2: drop the line-number gutter
 	ta.SetWidth(80)
 	sp := spinner.New()
+	vp := viewport.New(80, 24)
 	cwd, _, _, _ := engine.StatusInfo()
-	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle, spinner: sp, cwd: cwd}
+	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle, spinner: sp, viewport: vp, cwd: cwd}
 }
 
 // wrapWidth returns the terminal width for wrapping/glamour, defaulting to 80
@@ -91,12 +96,31 @@ func (m *model) Init() tea.Cmd { return tea.Batch(m.input.Focus(), m.scheduleSta
 
 // submit starts a turn: appends the user prompt, runs the engine, begins pumping.
 func (m *model) submit(prompt string) tea.Cmd {
-	m.sb.appendUser(prompt)
+	m.sbAppendUser(prompt)
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx, m.cancel = ctx, cancel
 	m.state = stateRunning
 	m.eventCh = m.engine.Run(ctx, prompt)
-	return tea.Batch(waitForEvent(m.eventCh), m.spinner.Tick)
+	return tea.Batch(waitForEvent(m.eventCh), m.spinner.Tick, scheduleFormatTick())
+}
+
+// rebuild re-renders the scrollback into the viewport (M5d). If the user is
+// currently pinned to the bottom, re-snap; otherwise leave their scroll
+// position alone (claude-code-style "don't yank back while reading history").
+func (m *model) rebuild() {
+	atBottom := m.viewport.AtBottom()
+	m.viewport.SetContent(m.sb.build(m.wrapWidth(), -1))
+	if atBottom {
+		m.viewport.GotoBottom()
+	}
+}
+
+// sbAppendUser appends a user block and immediately rebuilds, for callers
+// outside handleEvent (submit, slash commands) where no end-of-handler
+// rebuild runs. M5d.
+func (m *model) sbAppendUser(s string) {
+	m.sb.appendUser(s)
+	m.rebuild()
 }
 
 // eventMsg wraps one engine event for the bubbletea Update loop.
@@ -104,6 +128,15 @@ type eventMsg struct{ ev event.Event }
 
 // streamEndMsg is sent when the engine event channel closes.
 type streamEndMsg struct{}
+
+// formatTickMsg drives the throttled (120ms) scrollback rebuild while a turn
+// is running (M5d). Decouples token-stream rate from glamour rate so the
+// spinner tick never touches glamour.
+type formatTickMsg struct{}
+
+func scheduleFormatTick() tea.Cmd {
+	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return formatTickMsg{} })
+}
 
 func waitForEvent(ch <-chan event.Event) tea.Cmd {
 	return func() tea.Msg {
@@ -119,6 +152,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
+		m.viewport.Width = msg.Width
+		m.viewport.Height = msg.Height - 3 // 3 pinned lines: activity + status + input (M5d)
+		m.rebuild()
 		return m, nil
 	case tea.KeyMsg:
 		if m.state == stateAwaitingApproval {
@@ -185,6 +222,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusLineText = msg.text
 		}
 		return m, nil
+	case formatTickMsg:
+		if m.state == stateRunning {
+			m.rebuild()
+			return m, scheduleFormatTick()
+		}
+		return m, nil
 	case spinner.TickMsg:
 		if m.state == stateRunning || m.state == stateAwaitingApproval {
 			var c tea.Cmd
@@ -226,6 +269,7 @@ func (m *model) handleEvent(ev event.Event) {
 		m.sb.finishAssistant()
 		m.phase = phaseIdle
 	}
+	m.rebuild() // M5d: refresh viewport content after every event
 }
 
 // statusLineMsg carries the result of an async statusline command run.
@@ -318,25 +362,26 @@ func (m *model) maybeSlash(input string) (tea.Cmd, bool) {
 		return tea.Quit, true
 	case "clear":
 		m.sb.clear()
+		m.rebuild()
 		return nil, true
 	case "help":
-		m.sb.appendUser("/help: commands: /help /clear /quit /compact /model [name] /config")
+		m.sbAppendUser("/help: commands: /help /clear /quit /compact /model [name] /config")
 		return nil, true
 	case "compact":
 		msg, err := m.engine.CompressNow(context.Background())
 		if err != nil {
-			m.sb.appendUser("/compact: " + err.Error())
+			m.sbAppendUser("/compact: " + err.Error())
 		} else {
-			m.sb.appendUser("/compact: " + msg)
+			m.sbAppendUser("/compact: " + msg)
 		}
 		return nil, true
 	case "model":
 		return m.handleModel(rest), true
 	case "config":
-		m.sb.appendUser(configString(m.cfg))
+		m.sbAppendUser(configString(m.cfg))
 		return nil, true
 	default:
-		m.sb.appendUser("unknown command: /" + cmd + " " + rest)
+		m.sbAppendUser("unknown command: /" + cmd + " " + rest)
 		return nil, true
 	}
 }
@@ -353,14 +398,14 @@ func (m *model) handleModel(rest string) tea.Cmd {
 			}
 			b.WriteString(mark + name + "\n")
 		}
-		m.sb.appendUser(b.String())
+		m.sbAppendUser(b.String())
 		return nil
 	}
 	if err := m.engine.SetModel(rest); err != nil {
-		m.sb.appendUser("/model " + rest + ": " + err.Error())
+		m.sbAppendUser("/model " + rest + ": " + err.Error())
 		return nil
 	}
-	m.sb.appendUser("/model: switched to " + rest)
+	m.sbAppendUser("/model: switched to " + rest)
 	return m.scheduleStatusLine()
 }
 
@@ -377,12 +422,12 @@ func redactKey(k string) string {
 }
 
 func (m *model) View() string {
-	scroll := m.sb.build(m.wrapWidth(), -1)
+	bottom := m.statusLine() + "\n" + promptStyle.Render("> ") + m.input.View()
 	if m.state == stateAwaitingApproval {
-		return scroll + "\n" + fmt.Sprintf("Approve %s? [y]es / [n]o / [a]lways (ESC=deny)", m.pendingTool) + "\n" + m.input.View()
+		return m.viewport.View() + "\n" +
+			fmt.Sprintf("Approve %s? [y]es / [n]o / [a]lways (ESC=deny)", m.pendingTool) + "\n" + bottom
 	}
-	if act := m.activityLine(); act != "" {
-		scroll += "\n" + act
-	}
-	return scroll + "\n" + m.statusLine() + "\n" + promptStyle.Render("> ") + m.input.View()
+	// M5d: activity line is always present (empty when idle) so the pinned
+	// area is a stable 3 lines — no 1-line jitter between running/idle.
+	return m.viewport.View() + "\n" + m.activityLine() + "\n" + bottom
 }

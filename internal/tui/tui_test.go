@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -268,8 +269,6 @@ func TestWidthFromWindowSizeMsg(t *testing.T) {
 	}
 }
 
-// TestBuildFormatsOnBoundary is added in Task 4 (replaces TestTickFormatsPendingMarkdown).
-
 func TestStatusLineRendersCommandOutput(t *testing.T) {
 	ctrl := &fakeControl{
 		model:    "gpt-4o",
@@ -394,5 +393,82 @@ func TestInputNoVerticalPromptLine(t *testing.T) {
 	}
 	if m.input.ShowLineNumbers {
 		t.Fatal("textarea ShowLineNumbers should be false (no line-number gutter)")
+	}
+}
+
+// TestBuildFormatsOnBoundary replaces the old TestTickFormatsPendingMarkdown.
+// Formatting now happens in build() at a boundary, not on the spinner tick.
+func TestBuildFormatsOnBoundary(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.state = stateRunning
+	m.handleEvent(event.TextDelta{Delta: "**hi**"}) // no newline → pending, raw
+	if !strings.Contains(m.sb.build(80, -1), "**hi**") {
+		t.Fatalf("mid-line should show raw pending: %q", m.sb.build(80, -1))
+	}
+	m.handleEvent(event.TextDelta{Delta: "\n"}) // boundary → glamour
+	if strings.Contains(m.sb.build(80, -1), "**") {
+		t.Fatalf("post-boundary should be formatted (no **): %q", m.sb.build(80, -1))
+	}
+}
+
+// TestSpinnerTickDoesNotBuild — M5d iron rule 2: View()/tick path must not
+// run glamour. A spinner tick while streaming must not change committed state.
+func TestSpinnerTickDoesNotBuild(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.state = stateRunning
+	m.handleEvent(event.TextDelta{Delta: "**hi**\n"}) // boundary → build commits
+	m.rebuild()
+	committedBefore := m.sb.blocks[0].committed
+	m.Update(spinner.TickMsg{})
+	if m.sb.blocks[0].committed != committedBefore {
+		t.Fatalf("spinner tick mutated committed (iron rule 2 violation): %q != %q", m.sb.blocks[0].committed, committedBefore)
+	}
+}
+
+// TestFormatTickRebuildsWhileRunning — the 120ms formatTick drives rebuild
+// (and re-glams on boundary) while running; idle stops scheduling it.
+func TestFormatTickRebuildsWhileRunning(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.state = stateRunning
+	m.handleEvent(event.TextDelta{Delta: "**hi**\n"})
+	_, c := m.Update(formatTickMsg{})
+	if c == nil {
+		t.Fatal("expected next formatTick cmd while running")
+	}
+	m.state = stateIdle
+	_, c = m.Update(formatTickMsg{})
+	if c != nil {
+		t.Fatal("expected nil cmd (stop) while idle")
+	}
+}
+
+// TestWindowSizeMsgSetsViewportHeight — resize configures viewport dims.
+func TestWindowSizeMsgSetsViewportHeight(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if m.height != 40 || m.viewport.Width != 120 || m.viewport.Height != 37 {
+		t.Fatalf("resize: height=%d vp=%dx%d (want 40, 120x37)", m.height, m.viewport.Width, m.viewport.Height)
+	}
+}
+
+// TestRebuildSticksToBottom — when already at bottom, rebuild re-snaps;
+// scrolled up, it does not yank back.
+func TestRebuildSticksToBottom(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	for i := 0; i < 30; i++ {
+		m.sb.appendUser(strings.Repeat("line", 1) + fmt.Sprintf(" %d", i))
+	}
+	m.rebuild()
+	m.viewport.GotoBottom()
+	if !m.viewport.AtBottom() {
+		t.Fatal("expected at bottom after GotoBottom")
+	}
+	// scroll up, rebuild, should NOT snap back
+	m.viewport.PageUp()
+	atBot := m.viewport.AtBottom()
+	m.rebuild()
+	if atBot {
+		t.Fatal("scrolled-up state should be not-at-bottom")
 	}
 }

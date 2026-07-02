@@ -127,3 +127,18 @@ func TestFinishAssistantMarksDone(t *testing.T) {
 		t.Fatalf("done block lost text:\n%s", sb.build(80, -1))
 	}
 }
+
+// TestBuildDoneBlockRendersFullTextNoTrailingNewline — M5d regression: a
+// streamed assistant block whose text has no trailing newline has cl=0 while
+// streaming. The streaming build must not poison committed with glamour's
+// non-empty "" output, and the done build must render the full text.
+func TestBuildDoneBlockRendersFullTextNoTrailingNewline(t *testing.T) {
+	var sb scrollback
+	sb.appendAssistantText("Hello") // no trailing newline → cl=0 while streaming
+	sb.build(80, -1)                // streaming build
+	sb.finishAssistant()
+	got := sb.build(80, -1)
+	if !strings.Contains(got, "Hello") {
+		t.Fatalf("done block lost text (no trailing newline): %q", got)
+	}
+}
