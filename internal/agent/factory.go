@@ -42,6 +42,7 @@ type Engine struct {
 	workspaceCloser func() error
 	cwd             string             // M5b: cwd snapshot for statusline payload
 	settings        *settings.Settings // M5b: parsed settings (for StatusLineConfig)
+	readCache       *tool.ReadCache    // M6a: read-before-write guard, injected per turn
 }
 
 // NewEngine assembles an Engine from a resolved config (production path:
@@ -56,6 +57,10 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	tk := tool.NewEnhancedToolkit()
 	permCtx := permission.NewContext(permission.PermissionMode(cfg.Permission))
 	permEng := permission.NewEngine(permCtx)
+
+	// M6a: one ReadCache per engine, injected into each turn's ctx so the base
+	// Write/Edit read-before-write guard activates.
+	readCache := tool.NewReadCache(0, 0)
 
 	// M4a: discover skills (user ~/.lathe/skills + project .lathe/skills walk-up).
 	// Registered here so all paths (new/resume/continue) expose the Skill tool.
@@ -114,7 +119,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
 			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
-			cwd: cwd, settings: settingsCfg,
+			cwd: cwd, settings: settingsCfg, readCache: readCache,
 		}, nil
 	}
 	if cfg.Continue {
@@ -126,7 +131,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
 			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
-			cwd: cwd, settings: settingsCfg,
+			cwd: cwd, settings: settingsCfg, readCache: readCache,
 		}, nil
 	}
 
@@ -140,7 +145,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 		maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
 		session: sess, approvalCh: make(chan string, 1), mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
-		cwd: cwd, settings: settingsCfg,
+		cwd: cwd, settings: settingsCfg, readCache: readCache,
 	}
 	if sess != nil {
 		_ = sess.SaveMeta()
@@ -159,6 +164,7 @@ func newEngineForTest(cm model.ChatModel, tk *tool.Toolkit, eng *permission.Engi
 		cfg:         &config.Config{Provider: "openai", Model: "test-model", APIKey: "k"},
 		compressCfg: defaultCompressConfig(),
 		approvalCh:  make(chan string, 1),
+		readCache:   tool.NewReadCache(0, 0),
 	}
 }
 

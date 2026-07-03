@@ -433,3 +433,30 @@ func TestEngineTruncatesToolResultInConv(t *testing.T) {
 		t.Fatalf("conversation still holds full output: %d", len(convOut))
 	}
 }
+
+// TestEngineInjectsReadCache — M6a: the turn ctx passed to tools carries a
+// ReadCache, so the base Write/Edit read-before-write guard is active.
+func TestEngineInjectsReadCache(t *testing.T) {
+	probe := tool.NewFunctionTool("probe", "reports whether a ReadCache is in ctx",
+		json.RawMessage(`{"type":"object","properties":{},"required":[]}`),
+		func(ctx context.Context, input map[string]any) (any, error) {
+			if tool.GetReadCache(ctx) != nil {
+				return tool.NewTextResponse("cache:yes"), nil
+			}
+			return tool.NewTextResponse("cache:no"), nil
+		})
+	m := &fakeModel{turns: [][]model.ChatResponse{
+		{finalChunk(&model.ChatUsage{}, toolCallBlock("t1", "probe", `{}`))},
+		{textChunk("done"), finalChunk(&model.ChatUsage{})},
+	}}
+	eng := newEngineForTest(m, tool.NewToolkit(probe), bypassEngine(), 10)
+	var out string
+	for _, ev := range drain(eng.Run(context.Background(), "go")) {
+		if tr, ok := ev.(event.ToolResult); ok && tr.Name == "probe" {
+			out = tr.Output
+		}
+	}
+	if out != "cache:yes" {
+		t.Fatalf("ReadCache not injected into tool ctx: %q", out)
+	}
+}

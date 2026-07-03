@@ -5,6 +5,7 @@ import (
 
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/event"
 )
 
@@ -26,6 +27,12 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 	}
 	e.appendConv(message.UserMsg(e.name, prompt))
 	tools := e.toolkit.GetToolSchemas()
+
+	// M6a: inject the ReadCache so the base Write/Edit read-before-write guard is
+	// active for this turn (host mode; sandbox tools are bare closures unaffected).
+	if e.readCache != nil {
+		ctx = tool.WithReadCache(ctx, e.readCache)
+	}
 
 	for iter := 0; iter < e.maxIters; iter++ {
 		if ctx.Err() != nil {
