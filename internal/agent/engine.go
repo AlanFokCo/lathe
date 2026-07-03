@@ -77,6 +77,17 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 
 		results := dispatch(ctx, toolCalls, e.toolkit, e.permEng, e.interactive, e.approvalCh,
 			func(ev event.Event) { emitEvent(ctx, ch, ev) }, e.hookRunner)
+		// M6a: truncate large tool results before they enter the conversation. The
+		// full output already went out in the ToolResult event (for the TUI); this
+		// only bounds what is persisted into e.conv, preventing one huge result
+		// from blowing the context window before auto-compact can react.
+		for i := range results {
+			if s, ok := results[i].Output.(string); ok {
+				if truncated, did := truncateToolResult(s, e.compressCfg.ToolResultLimit); did {
+					results[i].Output = truncated
+				}
+			}
+		}
 		// tool results go in a USER-role message. Anthropic requires tool_result
 		// blocks in a user message (an assistant-role tool_result is invisible to
 		// the model → it loops, "stdout wasn't returned"). OpenAI/DashScope
@@ -116,6 +127,22 @@ func toolResultsToBlocks(results []message.ToolResultBlock) []message.ContentBlo
 		out[i] = r
 	}
 	return out
+}
+
+// truncateToolResult bounds a tool result to ~tokenLimit tokens (estimated as
+// len/4) before it enters the conversation, appending a marker when it cuts.
+// Reimplemented locally (mirrors agentscope's agent.TruncateToolResult) to avoid
+// importing the base agent package, which pulls in heavy transitive deps
+// (otel, qdrant) lathe otherwise doesn't need.
+func truncateToolResult(text string, tokenLimit int) (string, bool) {
+	if len(text)/4 <= tokenLimit {
+		return text, false
+	}
+	charLimit := tokenLimit * 4
+	if charLimit >= len(text) {
+		return text, false
+	}
+	return text[:charLimit] + "\n<<<TRUNCATED>>>", true
 }
 
 func emitEvent(ctx context.Context, ch chan<- event.Event, ev event.Event) {

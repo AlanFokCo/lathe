@@ -393,3 +393,43 @@ func TestEngineUsageCarriesCacheTokens(t *testing.T) {
 		t.Fatalf("cache tokens: creation=%d read=%d (want 7,3)", got.CacheCreationTokens, got.CacheReadTokens)
 	}
 }
+
+// TestEngineTruncatesToolResultInConv — M6a: a tool result larger than
+// compressCfg.ToolResultLimit is truncated in the conversation copy, while the
+// full output still reaches the TUI via the ToolResult event.
+func TestEngineTruncatesToolResultInConv(t *testing.T) {
+	big := strings.Repeat("A", 400_000) // ~100k est. tokens > 50k limit
+	bigToolkit := tool.NewToolkit(tool.NewFunctionTool("big", "big",
+		json.RawMessage(`{"type":"object","properties":{},"required":[]}`),
+		func(ctx context.Context, input map[string]any) (any, error) {
+			return tool.NewTextResponse(big), nil
+		}))
+	m := &recordingModel{turns: [][]model.ChatResponse{
+		{finalChunk(&model.ChatUsage{}, toolCallBlock("t1", "big", `{}`))},
+		{textChunk("done"), finalChunk(&model.ChatUsage{})},
+	}}
+	eng := newEngineForTest(m, bigToolkit, bypassEngine(), 10)
+	var fullInEvent bool
+	for _, ev := range drain(eng.Run(context.Background(), "go")) {
+		if tr, ok := ev.(event.ToolResult); ok && tr.Name == "big" && len(tr.Output) == len(big) {
+			fullInEvent = true
+		}
+	}
+	if !fullInEvent {
+		t.Fatal("ToolResult event should carry the FULL output")
+	}
+	var convOut string
+	for _, mm := range m.calls[1] {
+		for _, b := range mm.GetContentBlocks(message.ContentBlockToolResult) {
+			if tr, ok := b.(message.ToolResultBlock); ok {
+				convOut = tr.GetOutputText()
+			}
+		}
+	}
+	if !strings.Contains(convOut, "<<<TRUNCATED>>>") {
+		t.Fatalf("conversation tool_result not truncated (len=%d)", len(convOut))
+	}
+	if len(convOut) >= len(big) {
+		t.Fatalf("conversation still holds full output: %d", len(convOut))
+	}
+}
