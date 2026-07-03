@@ -40,3 +40,18 @@ func TestRenderMarkdownPlain(t *testing.T) {
 		t.Fatalf("plain text lost: %q", got)
 	}
 }
+
+func TestRendererCachedPerWidth(t *testing.T) {
+	r1, err := rendererFor(80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2, _ := rendererFor(80)
+	if r1 != r2 {
+		t.Fatal("same width should return the cached renderer instance")
+	}
+	r3, _ := rendererFor(100)
+	if r1 == r3 {
+		t.Fatal("different width should return a different renderer")
+	}
+}
