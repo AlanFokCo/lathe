@@ -71,6 +71,8 @@ type model struct {
 	viewport       viewport.Model
 	selectedTool   int // M5d: index into sb.blocks of the highlighted tool block, -1 none
 	cwd            string
+	dirty          bool // M6a: TextDelta marked scrollback dirty; drained by formatTick
+	rebuildN       int  // M6a: rebuild() call counter (test observability)
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
@@ -109,6 +111,7 @@ func (m *model) submit(prompt string) tea.Cmd {
 // currently pinned to the bottom, re-snap; otherwise leave their scroll
 // position alone (claude-code-style "don't yank back while reading history").
 func (m *model) rebuild() {
+	m.rebuildN++ // M6a: observability for the redraw-throttle test
 	atBottom := m.viewport.AtBottom()
 	m.viewport.SetContent(m.sb.build(m.wrapWidth(), m.selectedTool))
 	if atBottom {
@@ -331,7 +334,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case formatTickMsg:
 		if m.state == stateRunning {
-			m.rebuild()
+			if m.dirty { // M6a: only rebuild when streaming actually changed content
+				m.rebuild()
+				m.dirty = false
+			}
 			return m, scheduleFormatTick()
 		}
 		return m, nil
@@ -350,6 +356,8 @@ func (m *model) handleEvent(ev event.Event) {
 	switch e := ev.(type) {
 	case event.TextDelta:
 		m.sb.appendAssistantText(e.Delta)
+		m.dirty = true // M6a: defer the O(blocks) rebuild to the 120ms formatTick
+		return
 	case event.TurnStep:
 		m.phase = phaseThinking
 		m.step = e.Iter

@@ -560,3 +560,28 @@ func TestExpandEGatedOnEmptyInput(t *testing.T) {
 		t.Fatal("e with non-empty input should NOT expand")
 	}
 }
+
+// TestRedrawThrottleBatchesTextDeltas — M6a: streaming TextDeltas mark the
+// scrollback dirty but do not rebuild per token; the 120ms formatTick drains it.
+func TestRedrawThrottleBatchesTextDeltas(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24}) // rebuild() once
+	base := m.rebuildN
+	m.state = stateRunning
+	for i := 0; i < 5; i++ {
+		m.handleEvent(event.TextDelta{Delta: "x"})
+	}
+	if m.rebuildN != base {
+		t.Fatalf("text deltas must not rebuild immediately: %d vs base %d", m.rebuildN, base)
+	}
+	if !m.dirty {
+		t.Fatal("text delta should mark dirty")
+	}
+	m.Update(formatTickMsg{})
+	if m.rebuildN != base+1 {
+		t.Fatalf("tick should rebuild exactly once: %d vs base %d", m.rebuildN, base)
+	}
+	if m.dirty {
+		t.Fatal("tick should clear dirty")
+	}
+}
