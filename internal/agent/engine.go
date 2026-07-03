@@ -50,9 +50,11 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 		}
 		text, toolCalls, usage := accumulate(chunkCh, func(ev event.Event) { emitEvent(ctx, ch, ev) })
 		if usage != nil {
+			// M6a: source the model name from config (the resilience wrapper hides
+			// the provider's ModelName()); cfg.Model is authoritative.
 			modelName := ""
-			if mn, ok := e.chatModel.(interface{ ModelName() string }); ok {
-				modelName = mn.ModelName()
+			if e.cfg != nil {
+				modelName = e.cfg.Model
 			}
 			emitEvent(ctx, ch, event.Usage{
 				InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,

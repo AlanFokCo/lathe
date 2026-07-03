@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/resilience"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/session"
@@ -303,5 +306,33 @@ func TestBuildChatModelOllamaMissingModel(t *testing.T) {
 	_, err := buildChatModel(&config.Config{Provider: "ollama", APIKey: "ollama", BaseURL: "http://localhost:11434", Model: ""})
 	if err == nil {
 		t.Fatal("want error for missing model")
+	}
+}
+
+// alwaysErrModel is a ChatModel whose calls always fail — used to drive the
+// resilience circuit breaker to its open state.
+type alwaysErrModel struct{}
+
+func (alwaysErrModel) Chat(ctx context.Context, msgs []*message.Msg, opts ...model.CallOption) (*model.ChatResponse, error) {
+	return nil, errors.New("boom")
+}
+func (alwaysErrModel) ChatStream(ctx context.Context, msgs []*message.Msg, opts ...model.CallOption) (<-chan model.ChatResponse, error) {
+	return nil, errors.New("boom")
+}
+func (alwaysErrModel) CountTokens(msgs []*message.Msg, tools []model.ToolSchema) int { return 0 }
+
+// TestApplyResilienceOpensCircuit — M6a: after CircuitBreakerThreshold
+// consecutive failures the breaker opens and short-circuits further calls.
+func TestApplyResilienceOpensCircuit(t *testing.T) {
+	cfg := &config.Config{CircuitBreakerThreshold: 2}
+	cm := applyResilience(alwaysErrModel{}, cfg)
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		if _, err := cm.ChatStream(ctx, nil); err == nil {
+			t.Fatalf("call %d: want error", i)
+		}
+	}
+	if _, err := cm.ChatStream(ctx, nil); !errors.Is(err, resilience.ErrCircuitOpen) {
+		t.Fatalf("want ErrCircuitOpen after threshold, got %v", err)
 	}
 }

@@ -35,6 +35,10 @@ type Config struct {
 	Resume     string
 	Continue   bool
 	Sandbox    string // "" | docker | e2b
+	// M6a: resilience knobs for the model wrapper (circuit breaker + rate limit).
+	CircuitBreakerThreshold int     // consecutive failures before the breaker opens (default 5)
+	RateLimitPerSec         float64 // model calls/sec (0 = unlimited)
+	RateBurst               int     // burst allowance for the rate limiter
 }
 
 // Flags holds CLI overrides; empty fields are unset.
@@ -48,13 +52,14 @@ type Flags struct {
 // Load resolves a Config from flags + env + defaults.
 func Load(f Flags) (*Config, error) {
 	cfg := &Config{
-		Permission: "accept_edits",
-		Output:     OutputText,
-		MaxIters:   50,
-		Prompt:     f.Prompt,
-		Resume:     f.Resume,
-		Continue:   f.Continue,
-		Sandbox:    f.Sandbox,
+		Permission:              "accept_edits",
+		Output:                  OutputText,
+		MaxIters:                50,
+		Prompt:                  f.Prompt,
+		Resume:                  f.Resume,
+		Continue:                f.Continue,
+		Sandbox:                 f.Sandbox,
+		CircuitBreakerThreshold: 5, // M6a: default breaker threshold
 	}
 	if f.Permission != "" {
 		cfg.Permission = f.Permission

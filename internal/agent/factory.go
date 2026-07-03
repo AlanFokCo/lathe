@@ -4,41 +4,43 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	agentscope "github.com/alanfokco/agentscope-go/pkg/agentscope"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/mcp"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/resilience"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/skill"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/hooks"
 	"github.com/alanfokco/lathe/internal/mcpconfig"
-	"github.com/alanfokco/lathe/internal/skills"
 	"github.com/alanfokco/lathe/internal/session"
 	"github.com/alanfokco/lathe/internal/settings"
+	"github.com/alanfokco/lathe/internal/skills"
 	"github.com/alanfokco/lathe/internal/workspace"
 )
 
 // Engine is lathe's turn engine. It is NOT a wrapper around UnifiedAgent;
 // it drives model.ChatStream directly in its own loop.
 type Engine struct {
-	name        string
-	chatModel   model.ChatModel
-	toolkit     *tool.Toolkit
-	permEng     *permission.Engine
-	maxIters    int
-	conv        []*message.Msg
-	cfg         *config.Config
-	compressCfg compressConfig
-	session     *session.Session
-	interactive bool
-	approvalCh  chan string
+	name            string
+	chatModel       model.ChatModel
+	toolkit         *tool.Toolkit
+	permEng         *permission.Engine
+	maxIters        int
+	conv            []*message.Msg
+	cfg             *config.Config
+	compressCfg     compressConfig
+	session         *session.Session
+	interactive     bool
+	approvalCh      chan string
 	mcpClients      []mcp.Client
 	hookRunner      *hooks.Runner
 	workspaceCloser func() error
-	cwd             string              // M5b: cwd snapshot for statusline payload
+	cwd             string             // M5b: cwd snapshot for statusline payload
 	settings        *settings.Settings // M5b: parsed settings (for StatusLineConfig)
 }
 
@@ -112,7 +114,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
 			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
-		cwd: cwd, settings: settingsCfg,
+			cwd: cwd, settings: settingsCfg,
 		}, nil
 	}
 	if cfg.Continue {
@@ -124,7 +126,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
 			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
-		cwd: cwd, settings: settingsCfg,
+			cwd: cwd, settings: settingsCfg,
 		}, nil
 	}
 
@@ -237,25 +239,53 @@ func (e *Engine) Close() error {
 }
 
 func buildChatModel(cfg *config.Config) (model.ChatModel, error) {
+	var cm model.ChatModel
+	var err error
 	switch cfg.Provider {
 	case "anthropic":
-		return model.NewAnthropicChatModel(&model.AnthropicConfig{
+		cm, err = model.NewAnthropicChatModel(&model.AnthropicConfig{
 			APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model, MaxOutputTokens: 8192,
 		})
 	case "openai":
-		return model.NewOpenAIChatModel(model.OpenAIConfig{
+		cm, err = model.NewOpenAIChatModel(model.OpenAIConfig{
 			APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model,
 		})
 	case "dashscope":
-		return model.NewDashScopeChatModel(model.DashScopeConfig{
+		cm, err = model.NewDashScopeChatModel(model.DashScopeConfig{
 			APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model,
 		})
 	case "ollama":
-		return model.NewOpenAIChatModel(model.OpenAIConfig{
+		cm, err = model.NewOpenAIChatModel(model.OpenAIConfig{
 			APIKey:  cfg.APIKey,
 			BaseURL: cfg.BaseURL,
 			Model:   cfg.Model,
 		})
+	default:
+		return nil, fmt.Errorf("unsupported provider: %s", cfg.Provider)
 	}
-	return nil, fmt.Errorf("unsupported provider: %s", cfg.Provider)
+	if err != nil {
+		return nil, err
+	}
+	// M6a: decorate with resilience (circuit breaker + optional rate limit) so a
+	// transient provider/network error retries/short-circuits instead of aborting
+	// the whole turn.
+	return applyResilience(cm, cfg), nil
+}
+
+// applyResilience wraps cm with a circuit breaker (and an optional rate limiter
+// when RateLimitPerSec > 0). With no knobs set it still installs a default
+// breaker. Returns a model.ChatModel — the same interface the Engine holds, so
+// no Engine changes are needed.
+func applyResilience(cm model.ChatModel, cfg *config.Config) model.ChatModel {
+	threshold := cfg.CircuitBreakerThreshold
+	if threshold <= 0 {
+		threshold = 5
+	}
+	opts := []resilience.ResilienceOption{
+		resilience.WithCircuitBreaker(resilience.NewCircuitBreaker(threshold, 30*time.Second)),
+	}
+	if cfg.RateLimitPerSec > 0 {
+		opts = append(opts, resilience.WithRateLimit(resilience.NewRateLimiter(cfg.RateLimitPerSec, cfg.RateBurst)))
+	}
+	return resilience.Wrap(cm, opts...)
 }
