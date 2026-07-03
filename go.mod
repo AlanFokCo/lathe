@@ -3,7 +3,7 @@ module github.com/alanfokco/lathe
 go 1.26.3
 
 require (
-	github.com/alanfokco/agentscope-go v0.0.0-00010101000000-000000000000
+	github.com/alanfokco/agentscope-go v1.0.2-0.20260703033301-6ba6ed77fd38
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v1.0.0
@@ -53,6 +53,8 @@ require (
 )
 
 // Dev-only: resolve agentscope-go from the local sibling checkout.
-// Drop this replace (and use `go get github.com/alanfokco/agentscope-go@v2.0.3`)
-// before publishing lathe, or once agentscope-go is fetchable from your proxy.
+// The require above is the pseudo-version for tag v2.0.3.1 (commit 6ba6ed7); Go
+// cannot use the v2.x.x tags directly because agentscope-go's module path has
+// no /v2 suffix. To consume it as a real versioned module and drop this replace,
+// agentscope-go must adopt the /v2 module path and re-tag.
 replace github.com/alanfokco/agentscope-go => ../agentscope-go
