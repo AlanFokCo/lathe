@@ -30,6 +30,8 @@ func (ToolResult) Kind() string { return "tool_result" }
 // Usage reports token consumption for a model call.
 type Usage struct {
 	InputTokens, OutputTokens int
+	CacheCreationTokens       int // tokens written to the prompt cache (M6a)
+	CacheReadTokens           int // tokens served from the prompt cache (M6a)
 	Model                     string
 }
 

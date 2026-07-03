@@ -55,7 +55,10 @@ func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Eve
 				modelName = mn.ModelName()
 			}
 			emitEvent(ctx, ch, event.Usage{
-				InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, Model: modelName,
+				InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
+				CacheCreationTokens: usage.CacheCreationInputTokens,
+				CacheReadTokens:     usage.CacheInputTokens,
+				Model:               modelName,
 			})
 		}
 

@@ -22,6 +22,7 @@ func RenderStreamJSON(ctx context.Context, ch <-chan event.Event, out io.Writer)
 			obj["id"], obj["name"], obj["output"], obj["state"], obj["diff"] = e.ID, e.Name, e.Output, e.State, e.Diff
 		case event.Usage:
 			obj["input_tokens"], obj["output_tokens"], obj["model"] = e.InputTokens, e.OutputTokens, e.Model
+			obj["cache_creation_tokens"], obj["cache_read_tokens"] = e.CacheCreationTokens, e.CacheReadTokens
 		case event.ReplyEnd:
 			obj["reason"] = e.Reason
 		case event.ErrorEvent:

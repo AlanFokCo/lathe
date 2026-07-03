@@ -368,3 +368,28 @@ func TestEngineToolResultAppendedAsUserRole(t *testing.T) {
 		t.Fatalf("no user-role tool_result message in 2nd ChatStream call; roles=%v", roles)
 	}
 }
+
+// TestEngineUsageCarriesCacheTokens — M6a: the Usage event must surface the
+// prompt-cache tokens the base model returns (creation + read), not drop them.
+func TestEngineUsageCarriesCacheTokens(t *testing.T) {
+	m := &fakeModel{turns: [][]model.ChatResponse{
+		{textChunk("hi"), finalChunk(&model.ChatUsage{
+			InputTokens: 10, OutputTokens: 5,
+			CacheCreationInputTokens: 7, CacheInputTokens: 3,
+		})},
+	}}
+	eng := newEngineForTest(m, tool.NewToolkit(), bypassEngine(), 10)
+	var got *event.Usage
+	for _, ev := range drain(eng.Run(context.Background(), "hi")) {
+		if u, ok := ev.(event.Usage); ok {
+			uu := u
+			got = &uu
+		}
+	}
+	if got == nil {
+		t.Fatal("no Usage event")
+	}
+	if got.CacheCreationTokens != 7 || got.CacheReadTokens != 3 {
+		t.Fatalf("cache tokens: creation=%d read=%d (want 7,3)", got.CacheCreationTokens, got.CacheReadTokens)
+	}
+}
