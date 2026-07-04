@@ -407,10 +407,10 @@ func TestEngineToolResultAppendedAsUserRole(t *testing.T) {
 	}
 }
 
-// TestEngineUsageCarriesCacheTokens — M6a: the Usage event must surface the
-// prompt-cache tokens the base model returns (creation + read), not drop them.
+// TestEngineUsageCarriesCacheTokens — M6b: upstream agentscope now surfaces
+// prompt-cache tokens on ModelCallEndEvent (NewModelCallEndEventWithCache);
+// the fakeModel's ChatUsage carries them through the replyLoop.
 func TestEngineUsageCarriesCacheTokens(t *testing.T) {
-	t.Skip("M6b: agentscope's ModelCallEndEvent carries only input/output tokens (no cache); resurfacing prompt-cache tokens needs an upstream event enhancement or a usage middleware (M6b)")
 	m := &fakeModel{turns: [][]model.ChatResponse{
 		{textChunk("hi"), finalChunk(&model.ChatUsage{
 			InputTokens: 10, OutputTokens: 5,
@@ -421,6 +421,9 @@ func TestEngineUsageCarriesCacheTokens(t *testing.T) {
 	d := drainAll(eng.Run(context.Background(), "hi"))
 	if d.usage == nil {
 		t.Fatal("no ModelCallEnd event")
+	}
+	if d.usage.CacheCreationTokens != 7 || d.usage.CacheReadTokens != 3 {
+		t.Fatalf("cache tokens: creation=%d read=%d (want 7,3)", d.usage.CacheCreationTokens, d.usage.CacheReadTokens)
 	}
 }
 
