@@ -3,158 +3,176 @@ package agent
 import (
 	"context"
 
+	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
-	"github.com/alanfokco/lathe/internal/event"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
 )
 
-// Run executes the turn loop for a single user prompt, streaming events.
-// Loop: ChatStream → accumulate → emit text/usage → if tool calls, dispatch
-// and feed results back as an assistant-role message → repeat until no tool
-// calls or MaxIters.
-func (e *Engine) Run(ctx context.Context, prompt string) <-chan event.Event {
-	ch := make(chan event.Event, 64)
-	go e.runLoop(ctx, prompt, ch)
+// Run executes the agent for a single user prompt, streaming agentscope block-
+// lifecycle events. M6a Commit B: Run is a thin hook wrapper over UnifiedAgent
+// .ReplyStream — it runs the UserPromptSubmit/Stop settings hooks and captures
+// the pending HITL tool call (for SubmitApproval), then passes events through
+// UNCHANGED so render/tui consume agentscope events directly (no translator,
+// no internal/event).
+func (e *Engine) Run(ctx context.Context, prompt string) <-chan asevent.Event {
+	ch := make(chan asevent.Event, 64)
+	go e.runWrap(ctx, prompt, ch)
 	return ch
 }
 
-func (e *Engine) runLoop(ctx context.Context, prompt string, ch chan<- event.Event) {
+// runWrap runs the UserPromptSubmit hook, drives ReplyStream, and pumps
+// agentscope events to ch. It side-effects on RequireUserConfirmEvent (records
+// the pending approval) and ReplyEndEvent (fires the Stop hook); all events
+// are passed through unchanged.
+func (e *Engine) runWrap(ctx context.Context, prompt string, ch chan<- asevent.Event) {
 	defer close(ch)
-	// M4c: UserPromptSubmit hook (inject context into the prompt).
-	if r, _ := e.hookRunner.Run(ctx, "UserPromptSubmit", map[string]any{"prompt": prompt}); r.Context != "" {
-		prompt = prompt + "\n\n" + r.Context
+	// M4c: UserPromptSubmit hook (inject context into the prompt) — run here so
+	// the injected context reaches the model on the first call.
+	if e.hookRunner != nil {
+		if r, _ := e.hookRunner.Run(ctx, "UserPromptSubmit", map[string]any{"prompt": prompt}); r.Context != "" {
+			prompt = prompt + "\n\n" + r.Context
+		}
 	}
-	e.appendConv(message.UserMsg(e.name, prompt))
-	tools := e.toolkit.GetToolSchemas()
-
-	// M6a: inject the ReadCache so the base Write/Edit read-before-write guard is
-	// active for this turn (host mode; sandbox tools are bare closures unaffected).
-	if e.readCache != nil {
-		ctx = tool.WithReadCache(ctx, e.readCache)
+	asCh, err := e.agent.ReplyStream(ctx, prompt)
+	if err != nil {
+		// ReplyStream only fails on empty input (validated paths ensure non-empty).
+		// Surface as a custom error event so consumers see something + a stream end.
+		emitAsevent(ctx, ch, asevent.NewCustomEvent("", "error", map[string]any{"error": err.Error()}))
+		return
 	}
-
-	for iter := 0; iter < e.maxIters; iter++ {
-		if ctx.Err() != nil {
-			emitEvent(ctx, ch, event.ReplyEnd{Reason: "cancelled"})
-			return
-		}
-		emitEvent(ctx, ch, event.TurnStep{Iter: iter + 1, MaxIters: e.maxIters})
-		// auto-compact if the conversation exceeds the context threshold
-		if compacted, before, after, cerr := e.compressContext(ctx, false); cerr != nil {
-			emitEvent(ctx, ch, event.ErrorEvent{Err: cerr})
-		} else if compacted {
-			emitEvent(ctx, ch, event.Compacted{Before: before, After: after})
-		}
-		chunkCh, err := e.chatModel.ChatStream(ctx, e.conv,
-			model.WithTools(tools),
-			model.WithToolChoice(&model.ToolChoice{Mode: "auto"}),
-		)
-		if err != nil {
-			emitEvent(ctx, ch, event.ErrorEvent{Err: err})
-			emitEvent(ctx, ch, event.ReplyEnd{Reason: "error"})
-			return
-		}
-		text, toolCalls, usage := accumulate(chunkCh, func(ev event.Event) { emitEvent(ctx, ch, ev) })
-		if usage != nil {
-			// M6a: source the model name from config (the resilience wrapper hides
-			// the provider's ModelName()); cfg.Model is authoritative.
-			modelName := ""
-			if e.cfg != nil {
-				modelName = e.cfg.Model
+	var sawExceed, stopFired, sawReplyEnd bool
+	for asEv := range asCh {
+		switch ev := asEv.(type) {
+		case asevent.ExceedMaxItersEvent:
+			sawExceed = true
+		case asevent.RequireUserConfirmEvent:
+			if len(ev.ToolCalls) > 0 {
+				e.setPending(&pendingApproval{replyID: ev.ReplyID, toolCall: ev.ToolCalls[0]})
 			}
-			emitEvent(ctx, ch, event.Usage{
-				InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
-				CacheCreationTokens: usage.CacheCreationInputTokens,
-				CacheReadTokens:     usage.CacheInputTokens,
-				Model:               modelName,
-			})
-		}
-
-		// assistant message with text + tool calls
-		var blocks []message.ContentBlock
-		if text != "" {
-			blocks = append(blocks, message.TextBlock{Type: "text", Text: text})
-		}
-		blocks = append(blocks, toolCallsToBlocks(toolCalls)...)
-		e.appendConv(message.AssistantMsg(e.name, blocks))
-
-		if len(toolCalls) == 0 {
-			e.finishTurn(ctx, ch, "end_turn")
-			return
-		}
-
-		results := dispatch(ctx, toolCalls, e.toolkit, e.permEng, e.interactive, e.approvalCh,
-			func(ev event.Event) { emitEvent(ctx, ch, ev) }, e.hookRunner)
-		// M6a: truncate large tool results before they enter the conversation. The
-		// full output already went out in the ToolResult event (for the TUI); this
-		// only bounds what is persisted into e.conv, preventing one huge result
-		// from blowing the context window before auto-compact can react.
-		for i := range results {
-			if s, ok := results[i].Output.(string); ok {
-				if truncated, did := truncateToolResult(s, e.compressCfg.ToolResultLimit); did {
-					results[i].Output = truncated
-				}
+		case asevent.ReplyEndEvent:
+			sawReplyEnd = true
+			// M4c: fire the Stop hook before passing ReplyEnd through (matches the
+			// old finishTurn ordering: Stop then ReplyEnd).
+			if !stopFired {
+				stopFired = true
+				e.fireStop(ctx, endTurnReason(sawExceed))
 			}
 		}
-		// tool results go in a USER-role message. Anthropic requires tool_result
-		// blocks in a user message (an assistant-role tool_result is invisible to
-		// the model → it loops, "stdout wasn't returned"). OpenAI/DashScope
-		// formatters override the role to "tool" when a ToolResultBlock is present,
-		// so they are unaffected by this role choice.
-		e.appendConv(message.NewMsg(e.name, message.RoleUser, toolResultsToBlocks(results)))
+		emitAsevent(ctx, ch, asEv)
 	}
-	e.finishTurn(ctx, ch, "max_iters")
-}
-
-// finishTurn fires the Stop hook (fire-and-forget) then emits ReplyEnd.
-// cancelled/error exits do not fire Stop (interrupted/exceptional paths).
-func (e *Engine) finishTurn(ctx context.Context, ch chan<- event.Event, reason string) {
-	e.hookRunner.Run(ctx, "Stop", map[string]any{"reason": reason})
-	emitEvent(ctx, ch, event.ReplyEnd{Reason: reason})
-}
-
-// appendConv appends a message to e.conv and persists it to the session (if any).
-func (e *Engine) appendConv(msg *message.Msg) {
-	e.conv = append(e.conv, msg)
-	if e.session != nil {
-		_ = e.session.Save(msg)
+	// Defensive: if the stream ended without a ReplyEndEvent (e.g. agentscope's
+	// ctx-aware emit dropped it on cancel), fire Stop + emit a synthetic
+	// ReplyEnd so consumers always see a clean turn end.
+	if !stopFired {
+		stopFired = true
+		e.fireStop(ctx, endTurnReason(sawExceed))
+	}
+	if !sawReplyEnd {
+		emitAsevent(ctx, ch, asevent.NewReplyEndEvent(e.state.SessionID, e.state.ReplyID))
 	}
 }
 
-func toolCallsToBlocks(calls []message.ToolCallBlock) []message.ContentBlock {
-	out := make([]message.ContentBlock, len(calls))
-	for i, c := range calls {
-		out[i] = c
+func endTurnReason(sawExceed bool) string {
+	if sawExceed {
+		return "max_iters"
 	}
-	return out
+	return "end_turn"
 }
 
-func toolResultsToBlocks(results []message.ToolResultBlock) []message.ContentBlock {
-	out := make([]message.ContentBlock, len(results))
-	for i, r := range results {
-		out[i] = r
-	}
-	return out
+// pendingApproval is the HITL bridge state: runWrap records the pending
+// RequireUserConfirm (replyID + tool call) and SubmitApproval consumes it to
+// build a UserConfirmResultEvent for agent.SubmitUserConfirm.
+type pendingApproval struct {
+	replyID  string
+	toolCall message.ToolCallBlock
 }
 
-// truncateToolResult bounds a tool result to ~tokenLimit tokens (estimated as
-// len/4) before it enters the conversation, appending a marker when it cuts.
-// Reimplemented locally (mirrors agentscope's agent.TruncateToolResult) to avoid
-// importing the base agent package, which pulls in heavy transitive deps
-// (otel, qdrant) lathe otherwise doesn't need.
-func truncateToolResult(text string, tokenLimit int) (string, bool) {
-	if len(text)/4 <= tokenLimit {
-		return text, false
-	}
-	charLimit := tokenLimit * 4
-	if charLimit >= len(text) {
-		return text, false
-	}
-	return text[:charLimit] + "\n<<<TRUNCATED>>>", true
+func (e *Engine) setPending(p *pendingApproval) {
+	e.pendingMu.Lock()
+	e.pending = p
+	e.pendingMu.Unlock()
 }
 
-func emitEvent(ctx context.Context, ch chan<- event.Event, ev event.Event) {
+func (e *Engine) getPending() *pendingApproval {
+	e.pendingMu.Lock()
+	defer e.pendingMu.Unlock()
+	return e.pending
+}
+
+func (e *Engine) clearPending() {
+	e.pendingMu.Lock()
+	e.pending = nil
+	e.pendingMu.Unlock()
+}
+
+// fireStop runs the Stop hook (fire-and-forget). Called on ReplyEnd.
+func (e *Engine) fireStop(ctx context.Context, reason string) {
+	if e.hookRunner != nil {
+		e.hookRunner.Run(ctx, "Stop", map[string]any{"reason": reason})
+	}
+}
+
+// SetInteractive enables (TUI) or disables (print) interactive approval. M6a:
+// maps the configured permission mode to an effective mode — print (non-
+// interactive) collapses default/accept_edits to dont_ask so an Ask cannot
+// hang waiting for a user who is not there (matches the old engine's
+// !interactive→deny path); TUI restores the configured mode so default/
+// accept_edits surface RequireUserConfirm for the TUI to approve.
+func (e *Engine) SetInteractive(interactive bool) {
+	if e.permEng == nil || e.permEng.Context == nil {
+		return
+	}
+	e.permEng.Context.Mode = e.effectiveMode(interactive)
+}
+
+func (e *Engine) effectiveMode(interactive bool) permission.PermissionMode {
+	if interactive {
+		return e.configuredMode
+	}
+	return printEffectiveMode(e.configuredMode)
+}
+
+// printEffectiveMode maps a configured permission mode to its non-interactive
+// (print) effective mode. default/accept_edits → dont_ask (an Ask would hang
+// with no user to confirm). bypass/explore/dont_ask never Ask, so unchanged.
+func printEffectiveMode(m permission.PermissionMode) permission.PermissionMode {
+	switch m {
+	case permission.ModeDefault, permission.ModeAcceptEdits:
+		return permission.ModeDontAsk
+	default:
+		return m
+	}
+}
+
+// SubmitApproval delivers the user's approval decision ("allow"/"deny"/"always")
+// to the agent's pending RequireUserConfirm. M6a: bridges to agentscope's
+// SubmitUserConfirm. "always" attaches an allow Rule to the ConfirmResult;
+// agentscope's waitForConfirmation AddRule's it to the shared permission
+// Context (lathe's permEng sees it too — same Context pointer).
+func (e *Engine) SubmitApproval(decision string) {
+	pending := e.getPending()
+	if pending == nil || e.agent == nil {
+		return
+	}
+	var rules []any
+	if decision == "always" {
+		rules = []any{permission.Rule{
+			ToolName: pending.toolCall.Name,
+			Behavior: permission.BehaviorAllow,
+			Source:   "user",
+		}}
+	}
+	approved := decision == "allow" || decision == "always"
+	result := asevent.NewUserConfirmResultEvent(pending.replyID, []asevent.ConfirmResult{{
+		Confirmed: approved,
+		ToolCall:  pending.toolCall,
+		Rules:     rules,
+	}})
+	e.agent.SubmitUserConfirm(&result)
+	e.clearPending()
+}
+
+func emitAsevent(ctx context.Context, ch chan<- asevent.Event, ev asevent.Event) {
 	// Prefer a non-blocking send (the channel is buffered); only fall back to a
 	// ctx-aware send when the buffer is full. This ensures terminal events
 	// (e.g. ReplyEnd on cancel) are still emitted when ctx is already done.

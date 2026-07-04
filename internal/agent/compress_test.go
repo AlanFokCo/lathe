@@ -126,7 +126,7 @@ func TestCompressContextNoopUnderThreshold(t *testing.T) {
 func TestCompressContextOverThreshold(t *testing.T) {
 	m := &compressFakeModel{tokenCount: 200000}
 	eng := newEngineForTest(m, tool.NewToolkit(), bypassEngine(), 10)
-	eng.conv = append(eng.conv,
+	eng.state.Context = append(eng.state.Context,
 		message.UserMsg("u", "old1"),
 		message.UserMsg("u", "old2"),
 		message.UserMsg("u", "recent"),
@@ -138,13 +138,14 @@ func TestCompressContextOverThreshold(t *testing.T) {
 	if before != 200000 {
 		t.Fatalf("before=%d", before)
 	}
-	if len(eng.conv) < 2 {
-		t.Fatalf("conv too short: %d", len(eng.conv))
+	// M6a: state.Context holds no system message, so the summary is at [0].
+	if len(eng.state.Context) < 2 {
+		t.Fatalf("context too short: %d", len(eng.state.Context))
 	}
-	if eng.conv[1].Role != message.RoleUser {
-		t.Fatalf("summary msg role: %v", eng.conv[1].Role)
+	if eng.state.Context[0].Role != message.RoleUser {
+		t.Fatalf("summary msg role: %v", eng.state.Context[0].Role)
 	}
-	if s := eng.conv[1].GetTextContent(" "); s == nil || !strings.Contains(*s, "Previous context summary") {
-		t.Fatalf("summary msg: %v", eng.conv[1])
+	if s := eng.state.Context[0].GetTextContent(" "); s == nil || !strings.Contains(*s, "Previous context summary") {
+		t.Fatalf("summary msg: %v", eng.state.Context[0])
 	}
 }

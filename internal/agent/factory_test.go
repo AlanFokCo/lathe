@@ -64,7 +64,7 @@ func TestNewEngineResume(t *testing.T) {
 		t.Fatalf("newengine: %v", err)
 	}
 	blob := ""
-	for _, m := range eng.conv {
+	for _, m := range eng.state.Context {
 		if txt := m.GetTextContent(" "); txt != nil {
 			blob += *txt
 		}

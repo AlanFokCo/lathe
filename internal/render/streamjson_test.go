@@ -6,15 +6,15 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/alanfokco/lathe/internal/event"
+	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
 )
 
 func TestRenderStreamJSON(t *testing.T) {
-	evs := []event.Event{
-		event.TextDelta{Delta: "hi"},
-		event.ReplyEnd{Reason: "end_turn"},
+	evs := []asevent.Event{
+		asevent.NewTextBlockDeltaEvent("", "", "hi"),
+		asevent.NewReplyEndEvent("", ""),
 	}
-	ch := make(chan event.Event, len(evs))
+	ch := make(chan asevent.Event, len(evs))
 	for _, e := range evs {
 		ch <- e
 	}
@@ -29,6 +29,9 @@ func TestRenderStreamJSON(t *testing.T) {
 		var obj map[string]any
 		if err := json.Unmarshal(sc.Bytes(), &obj); err != nil {
 			t.Fatalf("invalid json line %q: %v", sc.Text(), err)
+		}
+		if obj["type"] == nil {
+			t.Fatalf("line missing type field: %q", sc.Text())
 		}
 		n++
 	}

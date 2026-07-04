@@ -5,19 +5,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alanfokco/lathe/internal/event"
+	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
 )
 
 func TestRenderText(t *testing.T) {
-	evs := []event.Event{
-		event.TextDelta{Delta: "Hel"},
-		event.TextDelta{Delta: "lo"},
-		event.ToolCallStart{ID: "t1", Name: "Read", Input: `{"path":"x"}`},
-		event.ToolResult{ID: "t1", Name: "Read", Output: "file contents", State: "success"},
-		event.Usage{InputTokens: 1, OutputTokens: 2, Model: "gpt-4o"},
-		event.ReplyEnd{Reason: "end_turn"},
+	evs := []asevent.Event{
+		asevent.NewTextBlockDeltaEvent("", "", "Hel"),
+		asevent.NewTextBlockDeltaEvent("", "", "lo"),
+		asevent.NewToolCallStartEvent("", "t1", "Read"),
+		asevent.NewToolResultStartEvent("", "t1", "Read"),
+		asevent.NewToolResultTextDeltaEvent("", "t1", "file contents"),
+		asevent.NewToolResultEndEvent("", "t1", message.ToolResultSuccess),
+		asevent.NewModelCallStartEvent("", "gpt-4o"),
+		asevent.NewModelCallEndEvent("", 1, 2),
+		asevent.NewReplyEndEvent("", ""),
 	}
-	ch := make(chan event.Event, len(evs))
+	ch := make(chan asevent.Event, len(evs))
 	for _, e := range evs {
 		ch <- e
 	}

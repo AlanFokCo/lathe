@@ -6,8 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
 	"github.com/alanfokco/lathe/internal/config"
-	"github.com/alanfokco/lathe/internal/event"
 	"github.com/alanfokco/lathe/internal/settings"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,11 +17,11 @@ import (
 // fakeRunner provides Run (the streaming channel); fakeControl embeds it and
 // adds SetModel/ListModels/ModelName so it satisfies EngineControl.
 type fakeRunner struct {
-	events []event.Event
+	events []asevent.Event
 }
 
-func (f *fakeRunner) Run(ctx context.Context, prompt string) <-chan event.Event {
-	ch := make(chan event.Event, len(f.events))
+func (f *fakeRunner) Run(ctx context.Context, prompt string) <-chan asevent.Event {
+	ch := make(chan asevent.Event, len(f.events))
 	for _, e := range f.events {
 		ch <- e
 	}
@@ -62,12 +63,34 @@ func (f *fakeControl) StatusLineConfig() *settings.StatusLineConfig { return f.s
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 
+// event helpers (agentscope constructors need replyID/IDs; "" / "t1" suffice for tests).
+func td(delta string) asevent.Event { return asevent.NewTextBlockDeltaEvent("", "", delta) }
+func usage(in, out int) asevent.Event {
+	return asevent.NewModelCallEndEvent("", in, out)
+}
+func end() asevent.Event { return asevent.NewReplyEndEvent("", "") }
+func callStart(id, name string) asevent.Event {
+	return asevent.NewToolCallStartEvent("", id, name)
+}
+func result(id, name, output string, state message.ToolResultState) []asevent.Event {
+	return []asevent.Event{
+		asevent.NewToolResultStartEvent("", id, name),
+		asevent.NewToolResultTextDeltaEvent("", id, output),
+		asevent.NewToolResultEndEvent("", id, state),
+	}
+}
+func confirm(id, name string) asevent.Event {
+	return asevent.NewRequireUserConfirmEvent("", []message.ToolCallBlock{
+		{Type: "tool_call", ID: id, Name: name},
+	})
+}
+
 func TestModelRendersStreamingTextTurn(t *testing.T) {
-	runner := &fakeControl{model: "gpt-4o", fakeRunner: fakeRunner{events: []event.Event{
-		event.TextDelta{Delta: "Hel"},
-		event.TextDelta{Delta: "lo"},
-		event.Usage{InputTokens: 1, OutputTokens: 2, Model: "gpt-4o"},
-		event.ReplyEnd{Reason: "end_turn"},
+	runner := &fakeControl{model: "gpt-4o", fakeRunner: fakeRunner{events: []asevent.Event{
+		td("Hel"),
+		td("lo"),
+		usage(1, 2),
+		end(),
 	}}}
 	m := newModel(runner, testCfg())
 	cmd := m.submit("hi")
@@ -109,8 +132,8 @@ func TestModelSlashClear(t *testing.T) {
 
 func TestModelCostAccumulation(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
-	m.handleEvent(event.Usage{InputTokens: 10, OutputTokens: 5, Model: "gpt-4o"})
-	m.handleEvent(event.Usage{InputTokens: 3, OutputTokens: 2, Model: "gpt-4o"})
+	m.handleEvent(usage(10, 5))
+	m.handleEvent(usage(3, 2))
 	if m.cumIn != 13 || m.cumOut != 7 {
 		t.Fatalf("cum: in=%d out=%d", m.cumIn, m.cumOut)
 	}
@@ -194,7 +217,7 @@ func TestModelSlashCompact(t *testing.T) {
 
 func TestModelHandleCompactedEvent(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
-	m.handleEvent(event.Compacted{Before: 1000, After: 100})
+	m.handleEvent(asevent.NewCustomEvent("", "compacted", map[string]any{"before": 1000, "after": 100}))
 	got := m.View()
 	if !strings.Contains(got, "1000") || !strings.Contains(got, "100") {
 		t.Fatalf("scrollback missing compacted tokens:\n%s", got)
@@ -203,7 +226,7 @@ func TestModelHandleCompactedEvent(t *testing.T) {
 
 func TestModelRequireApprovalShowsModal(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
-	m.handleEvent(event.RequireApproval{ID: "t1", ToolName: "Bash", Input: `{"command":"ls"}`})
+	m.handleEvent(confirm("t1", "Bash"))
 	if m.state != stateAwaitingApproval {
 		t.Fatalf("state: %v", m.state)
 	}
@@ -225,7 +248,7 @@ func TestModelApprovalKeys(t *testing.T) {
 	for _, c := range cases {
 		ctrl := &fakeControl{model: "gpt-4o"}
 		m := newModel(ctrl, testCfg())
-		m.handleEvent(event.RequireApproval{ID: "t1", ToolName: "Bash", Input: `{}`})
+		m.handleEvent(confirm("t1", "Bash"))
 		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{rune(c.key)}})
 		if len(ctrl.approvalCalls) != 1 || ctrl.approvalCalls[0] != c.want {
 			t.Fatalf("key %c: got %v want %q", c.key, ctrl.approvalCalls, c.want)
@@ -239,7 +262,7 @@ func TestModelApprovalKeys(t *testing.T) {
 func TestModelApprovalESC(t *testing.T) {
 	ctrl := &fakeControl{model: "gpt-4o"}
 	m := newModel(ctrl, testCfg())
-	m.handleEvent(event.RequireApproval{ID: "t1", ToolName: "Bash", Input: `{}`})
+	m.handleEvent(confirm("t1", "Bash"))
 	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	if len(ctrl.approvalCalls) != 1 || ctrl.approvalCalls[0] != "deny" {
 		t.Fatalf("ESC: got %v want deny", ctrl.approvalCalls)
@@ -248,7 +271,7 @@ func TestModelApprovalESC(t *testing.T) {
 
 func TestStatusLineFallback(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
-	m.handleEvent(event.Usage{InputTokens: 7, OutputTokens: 3, Model: "gpt-4o"})
+	m.handleEvent(usage(7, 3))
 	got := m.View()
 	if !strings.Contains(got, "gpt-4o") || !strings.Contains(got, "in=7 out=3") {
 		t.Fatalf("fallback status missing:\n%s", got)
@@ -311,9 +334,9 @@ func TestStatusLineRefreshesAfterReplyEnd(t *testing.T) {
 	ctrl := &fakeControl{
 		model:    "gpt-4o",
 		slConfig: &settings.StatusLineConfig{Type: "command", Command: "echo refreshed"},
-		fakeRunner: fakeRunner{events: []event.Event{
-			event.Usage{InputTokens: 5, OutputTokens: 1, Model: "gpt-4o"},
-			event.ReplyEnd{Reason: "end_turn"},
+		fakeRunner: fakeRunner{events: []asevent.Event{
+			usage(5, 1),
+			end(),
 		}},
 	}
 	m := newModel(ctrl, testCfg())
@@ -344,30 +367,31 @@ func TestStatusLineRefreshesOnModelSwitch(t *testing.T) {
 	}
 }
 
+// TestActivityLineThinking — M6a Commit B: phase is driven by ModelCallStart
+// (no TurnStep/step display).
 func TestActivityLineThinking(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
 	m.state = stateRunning
-	m.handleEvent(event.TurnStep{Iter: 2, MaxIters: 50})
+	m.handleEvent(asevent.NewModelCallStartEvent("", "gpt-4o"))
 	got := m.View()
-	if !strings.Contains(got, "thinking") || !strings.Contains(got, "step 2/50") {
-		t.Fatalf("activity line missing thinking/step:\n%s", got)
+	if !strings.Contains(got, "thinking") {
+		t.Fatalf("activity line missing thinking:\n%s", got)
 	}
 }
 
 func TestActivityLineRunning(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
 	m.state = stateRunning
-	m.handleEvent(event.TurnStep{Iter: 3, MaxIters: 50})
-	m.handleEvent(event.ToolCallStart{ID: "t1", Name: "Bash", Input: `{}`})
+	m.handleEvent(callStart("t1", "Bash"))
 	got := m.View()
-	if !strings.Contains(got, "running Bash") || !strings.Contains(got, "step 3/50") {
+	if !strings.Contains(got, "running Bash") {
 		t.Fatalf("activity line missing running tool:\n%s", got)
 	}
 }
 
 func TestActivityLineHiddenWhenIdle(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg()) // stateIdle
-	m.handleEvent(event.TurnStep{Iter: 1, MaxIters: 50})
+	m.handleEvent(asevent.NewModelCallStartEvent("", "gpt-4o"))
 	got := m.View()
 	if strings.Contains(got, "thinking") || strings.Contains(got, "running") {
 		t.Fatalf("activity line should be hidden when idle:\n%s", got)
@@ -401,11 +425,11 @@ func TestInputNoVerticalPromptLine(t *testing.T) {
 func TestBuildFormatsOnBoundary(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
 	m.state = stateRunning
-	m.handleEvent(event.TextDelta{Delta: "**hi**"}) // no newline → pending, raw
+	m.handleEvent(td("**hi**")) // no newline → pending, raw
 	if !strings.Contains(m.sb.build(80, -1), "**hi**") {
 		t.Fatalf("mid-line should show raw pending: %q", m.sb.build(80, -1))
 	}
-	m.handleEvent(event.TextDelta{Delta: "\n"}) // boundary → glamour
+	m.handleEvent(td("\n")) // boundary → glamour
 	if strings.Contains(m.sb.build(80, -1), "**") {
 		t.Fatalf("post-boundary should be formatted (no **): %q", m.sb.build(80, -1))
 	}
@@ -416,7 +440,7 @@ func TestBuildFormatsOnBoundary(t *testing.T) {
 func TestSpinnerTickDoesNotBuild(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
 	m.state = stateRunning
-	m.handleEvent(event.TextDelta{Delta: "**hi**\n"}) // boundary → build commits
+	m.handleEvent(td("**hi**\n")) // boundary → build commits
 	m.rebuild()
 	committedBefore := m.sb.blocks[0].committed
 	m.Update(spinner.TickMsg{})
@@ -430,7 +454,7 @@ func TestSpinnerTickDoesNotBuild(t *testing.T) {
 func TestFormatTickRebuildsWhileRunning(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
 	m.state = stateRunning
-	m.handleEvent(event.TextDelta{Delta: "**hi**\n"})
+	m.handleEvent(td("**hi**\n"))
 	_, c := m.Update(formatTickMsg{})
 	if c == nil {
 		t.Fatal("expected next formatTick cmd while running")
@@ -478,8 +502,10 @@ func TestRebuildSticksToBottom(t *testing.T) {
 func TestToolBlockCollapsedThenExpanded(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
-	m.handleEvent(event.ToolCallStart{ID: "t1", Name: "Read", Input: `{"path":"x"}`})
-	m.handleEvent(event.ToolResult{ID: "t1", Output: "secret-output-line1\nline2", State: "success"})
+	m.handleEvent(callStart("t1", "Read"))
+	for _, ev := range result("t1", "Read", "secret-output-line1\nline2", message.ToolResultSuccess) {
+		m.handleEvent(ev)
+	}
 
 	view := m.View()
 	if strings.Contains(view, "secret-output-line1") {
@@ -507,10 +533,14 @@ func TestToolBlockCollapsedThenExpanded(t *testing.T) {
 func TestSelectionCyclesThroughToolBlocks(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
-	m.handleEvent(event.ToolCallStart{ID: "a", Name: "Read", Input: `{}`})
-	m.handleEvent(event.ToolResult{ID: "a", Output: "a-out", State: "success"})
-	m.handleEvent(event.ToolCallStart{ID: "b", Name: "Bash", Input: `{}`})
-	m.handleEvent(event.ToolResult{ID: "b", Output: "b-out", State: "success"})
+	m.handleEvent(callStart("a", "Read"))
+	for _, ev := range result("a", "Read", "a-out", message.ToolResultSuccess) {
+		m.handleEvent(ev)
+	}
+	m.handleEvent(callStart("b", "Bash"))
+	for _, ev := range result("b", "Bash", "b-out", message.ToolResultSuccess) {
+		m.handleEvent(ev)
+	}
 
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}}) // select last (b)
 	if m.selectedTool < 0 || m.sb.blocks[m.selectedTool].toolName != "Bash" {
@@ -547,8 +577,10 @@ func TestPgUpPgDownScrollsViewport(t *testing.T) {
 func TestExpandEGatedOnEmptyInput(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
-	m.handleEvent(event.ToolCallStart{ID: "a", Name: "Read", Input: `{}`})
-	m.handleEvent(event.ToolResult{ID: "a", Output: "out", State: "success"})
+	m.handleEvent(callStart("a", "Read"))
+	for _, ev := range result("a", "Read", "out", message.ToolResultSuccess) {
+		m.handleEvent(ev)
+	}
 	m.input.Focus() // M5d: mimic Init() focusing the textarea so typed runes land
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}}) // select
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}) // type 'x' into input
@@ -569,7 +601,7 @@ func TestRedrawThrottleBatchesTextDeltas(t *testing.T) {
 	base := m.rebuildN
 	m.state = stateRunning
 	for i := 0; i < 5; i++ {
-		m.handleEvent(event.TextDelta{Delta: "x"})
+		m.handleEvent(td("x"))
 	}
 	if m.rebuildN != base {
 		t.Fatalf("text deltas must not rebuild immediately: %d vs base %d", m.rebuildN, base)

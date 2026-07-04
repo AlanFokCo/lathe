@@ -169,10 +169,16 @@ func adjustSplitForToolPairs(msgs []*message.Msg, splitIdx int) int {
 	return maxOrphanIdx + 1
 }
 
-// compressContext checks if e.conv exceeds the context threshold and, if so,
-// generates a structured summary of the older messages and replaces them.
+// compressContext checks if the conversation exceeds the context threshold and,
+// if so, generates a structured summary of the older messages and replaces them.
 // If force is true it compresses regardless of threshold (for /compact).
 // Returns compacted=true if compression happened, plus before/after token counts.
+//
+// M6a: this is now used only by CompressNow (/compact, between turns); the
+// ReAct loop's auto-compress is agentscope's compressContext via WithContextConfig.
+// state.Context does NOT hold the system message (agentscope prepends it from
+// sysPrompt), so a synthetic system msg is prepended here for token counting
+// and for splitContextForCompression (which treats conv[0] as system).
 func (e *Engine) compressContext(ctx context.Context, force bool) (compacted bool, before, after int, err error) {
 	cfg := e.compressCfg
 	ctxSize := cfg.ContextSize
@@ -180,27 +186,25 @@ func (e *Engine) compressContext(ctx context.Context, force bool) (compacted boo
 		ctxSize = model.ResolveContextSize(e.chatModel, 128000)
 	}
 	tools := e.toolkit.GetToolSchemas()
-	before = e.chatModel.CountTokens(e.conv, tools)
+	sysMsg := message.SystemMsg(e.name, e.sysPrompt)
+	conv := append([]*message.Msg{sysMsg}, e.state.Context...)
+	before = e.chatModel.CountTokens(conv, tools)
 	threshold := int(float64(ctxSize) * cfg.TriggerRatio)
 	if !force && before < threshold {
 		return false, before, 0, nil
 	}
-	if len(e.conv) <= 1 {
+	if len(conv) <= 1 {
 		return false, before, before, nil // only system, nothing to compress
 	}
 	reserveBudget := int(float64(ctxSize) * cfg.ReserveRatio)
-	toCompress, toReserve := splitContextForCompression(e.conv, reserveBudget, e.chatModel, tools)
+	toCompress, toReserve := splitContextForCompression(conv, reserveBudget, e.chatModel, tools)
 	if len(toCompress) == 0 {
 		return false, before, before, nil
 	}
-	systemPrompt := ""
-	if t := e.conv[0].GetTextContent("\n"); t != nil {
-		systemPrompt = *t
-	}
-	compMsgs := buildCompressionMessages(systemPrompt, "", toCompress, cfg.CompressionPrompt)
+	compMsgs := buildCompressionMessages(e.sysPrompt, "", toCompress, cfg.CompressionPrompt)
 	result, rerr := model.GenerateStructuredOutput(ctx, e.chatModel, compMsgs, cfg.SummarySchema)
 	if rerr != nil {
-		result, rerr = e.retryCompressWithFewer(ctx, systemPrompt, toCompress, cfg, ctxSize, tools)
+		result, rerr = e.retryCompressWithFewer(ctx, e.sysPrompt, toCompress, cfg, ctxSize, tools)
 		if rerr != nil {
 			return false, before, 0, fmt.Errorf("compress: %w", rerr)
 		}
@@ -210,11 +214,9 @@ func (e *Engine) compressContext(ctx context.Context, force bool) (compacted boo
 		return false, before, 0, fmt.Errorf("format summary: %w", ferr)
 	}
 	summaryMsg := message.UserMsg("user", "[Previous context summary]\n"+summary)
-	newConv := make([]*message.Msg, 0, 2+len(toReserve))
-	newConv = append(newConv, e.conv[0], summaryMsg)
-	newConv = append(newConv, toReserve...)
-	e.conv = newConv
-	after = e.chatModel.CountTokens(e.conv, tools)
+	// state.Context (no system msg) = [summaryMsg, ...toReserve].
+	e.state.Context = append([]*message.Msg{summaryMsg}, toReserve...)
+	after = e.chatModel.CountTokens(append([]*message.Msg{sysMsg}, e.state.Context...), tools)
 	return true, before, after, nil
 }
 
@@ -242,5 +244,9 @@ func (e *Engine) CompressNow(ctx context.Context) (string, error) {
 	if !compacted {
 		return "no compaction needed", nil
 	}
+	// Re-assemble so the persistHook baseline resets to the new (shorter)
+	// state.Context length; otherwise its saved offset would be stale and new
+	// messages after /compact would not flush to the session.
+	e.assembleAgent()
 	return fmt.Sprintf("compressed: %d→%d tokens", before, after), nil
 }

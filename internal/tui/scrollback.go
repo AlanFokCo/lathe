@@ -3,7 +3,6 @@ package tui
 import (
 	"strings"
 
-	"github.com/alanfokco/lathe/internal/event"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -13,12 +12,13 @@ const (
 	kindUser blockKind = iota
 	kindAssistant
 	kindTool
-	kindUsage
 	kindError
 )
 
 // block is one scrollback entry. M5d upgrades the assistant streaming fields
 // (committed/commitLen/fmtWidth/done) and adds tool summary/expand fields.
+// M6a Commit B: tool output is accumulated from ToolResultTextDeltaEvent by
+// tool-call ID (appendToolResultDelta), then finishTool marks done.
 type block struct {
 	kind      blockKind
 	text      string // assistant: full raw streamed text
@@ -28,6 +28,7 @@ type block struct {
 	fmtWidth  int    // width committed was rendered at (resize detect)
 	done      bool   // assistant: ReplyEnd reached; tool: finishTool called
 	// tool fields:
+	toolID    string
 	toolName  string
 	toolIn    string
 	toolOut   string
@@ -69,26 +70,34 @@ func (s *scrollback) finishAssistant() {
 }
 
 func (s *scrollback) appendTool(id, name, input string) {
-	s.blocks = append(s.blocks, block{kind: kindTool, toolName: name, toolIn: input})
+	s.blocks = append(s.blocks, block{kind: kindTool, toolID: id, toolName: name, toolIn: input})
 	s.lastAssistant = -1
 }
 
-func (s *scrollback) finishTool(id, output, state, diff string) {
+// appendToolResultDelta accumulates a tool-result text delta into the matching
+// (by tool-call ID) unfinished tool block (M6a Commit B).
+func (s *scrollback) appendToolResultDelta(id, delta string) {
 	for i := len(s.blocks) - 1; i >= 0; i-- {
-		if s.blocks[i].kind == kindTool && !s.blocks[i].done {
-			s.blocks[i].toolOut = output
-			s.blocks[i].toolState = state
-			s.blocks[i].diff = diff
-			s.blocks[i].summary = summarize(s.blocks[i].toolName, output, state, diff)
-			s.blocks[i].done = true
+		if s.blocks[i].kind == kindTool && s.blocks[i].toolID == id && !s.blocks[i].done {
+			s.blocks[i].toolOut += delta
 			return
 		}
 	}
 }
 
-// appendUsage is a no-op (M5c-2): per-call usage is noise; cumulative tokens
-// live in the status line. Kept so tui.handleEvent callers don't change.
-func (s *scrollback) appendUsage(u event.Usage) {}
+// finishTool marks the matching (by tool-call ID) unfinished tool block done
+// and caches its one-line summary (M5d, M6a Commit B).
+func (s *scrollback) finishTool(id, state string) {
+	for i := len(s.blocks) - 1; i >= 0; i-- {
+		if s.blocks[i].kind == kindTool && s.blocks[i].toolID == id && !s.blocks[i].done {
+			b := &s.blocks[i]
+			b.toolState = state
+			b.summary = summarize(b.toolName, b.toolOut, state, b.diff)
+			b.done = true
+			return
+		}
+	}
+}
 
 func (s *scrollback) appendError(err error) {
 	s.blocks = append(s.blocks, block{kind: kindError, text: err.Error()})

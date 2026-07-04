@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
+	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
-	"github.com/alanfokco/lathe/internal/config"
-	"github.com/alanfokco/lathe/internal/event"
 )
 
 var taskToolSchema = json.RawMessage(`{
@@ -65,22 +63,11 @@ func (t *TaskTool) Execute(ctx context.Context, input map[string]any) (*tool.Too
 	if prompt == "" {
 		return tool.NewErrorResponse(fmt.Errorf("prompt is required")), nil
 	}
-	sub := &Engine{
-		name:        "lathe-subagent",
-		chatModel:   t.chatModel,
-		toolkit:     t.subToolkit,
-		permEng:     t.permEng,
-		maxIters:    t.maxIters,
-		conv:        []*message.Msg{message.SystemMsg("lathe-subagent", subagentSysPrompt)},
-		cfg:         &config.Config{},
-		compressCfg: defaultCompressConfig(),
-		approvalCh:  make(chan string, 1),
-		interactive: false,
-	}
+	sub := newSubagentEngine("lathe-subagent", subagentSysPrompt, t.chatModel, t.subToolkit, t.permEng, t.maxIters)
 	ch := sub.Run(ctx, prompt)
 	var text strings.Builder
 	for ev := range ch {
-		if td, ok := ev.(event.TextDelta); ok {
+		if td, ok := ev.(asevent.TextBlockDeltaEvent); ok {
 			text.WriteString(td.Delta)
 		}
 	}

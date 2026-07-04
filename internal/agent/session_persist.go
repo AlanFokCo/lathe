@@ -1,30 +1,34 @@
 package agent
 
 import (
-	asagent "github.com/alanfokco/agentscope-go/pkg/agentscope/agent"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/protocol"
-	"github.com/alanfokco/lathe/internal/session"
 )
 
 // persistHook is a loop.Hook that flushes new agent state.Context messages to
 // the lathe session JSONL when a reply loop ends, mirroring the old engine's
-// appendConv-to-session behavior. It embeds baseHook for no-op lifecycle
-// methods and overrides OnLoopEnd.
+// appendConv-to-session behavior. It holds a back-reference to the Engine so
+// it reads e.session/e.state live (tests assign e.session after construction;
+// the hook picks it up at OnLoopEnd time).
+//
+// OnLoopEnd fires once per ReplyStream (deferred in agentscope's replyLoop),
+// after state.Context is fully populated for that turn. `saved` persists
+// across calls so only newly-appended messages are flushed.
 type persistHook struct {
 	baseHook
-	state   *asagent.AgentState
-	session *session.Session
-	saved   int
+	e     *Engine
+	saved int
 }
 
 func (h *persistHook) OnLoopEnd(_ error) {
-	if h.session == nil || h.state == nil {
+	s := h.e.session
+	st := h.e.state
+	if s == nil || st == nil {
 		return
 	}
-	for i := h.saved; i < len(h.state.Context); i++ {
-		_ = h.session.Save(h.state.Context[i])
+	for i := h.saved; i < len(st.Context); i++ {
+		_ = s.Save(st.Context[i])
 	}
-	h.saved = len(h.state.Context)
+	h.saved = len(st.Context)
 }
 
 // baseHook provides empty defaults for every loop.Hook method except

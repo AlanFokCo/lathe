@@ -3,8 +3,6 @@ package tui
 import (
 	"strings"
 	"testing"
-
-	"github.com/alanfokco/lathe/internal/event"
 )
 
 func TestScrollbackBuildsTextAndTool(t *testing.T) {
@@ -13,7 +11,8 @@ func TestScrollbackBuildsTextAndTool(t *testing.T) {
 	sb.appendAssistantText("Hel")
 	sb.appendAssistantText("lo")
 	sb.appendTool("t1", "Read", `{"path":"x"}`)
-	sb.finishTool("t1", "line1\nline2\nline3", "success", "")
+	sb.appendToolResultDelta("t1", "line1\nline2\nline3")
+	sb.finishTool("t1", "success")
 
 	got := sb.build(80, -1)
 	for _, want := range []string{"do X", "Hello", "Read", "●", "3 lines", "[✓]"} {
@@ -96,18 +95,22 @@ func TestStreamingCommittedMonotonic(t *testing.T) {
 func TestToolBlockStyled(t *testing.T) {
 	var sb scrollback
 	sb.appendTool("t1", "Bash", `{"command":"ls"}`)
-	sb.finishTool("t1", "done", "success", "")
+	sb.appendToolResultDelta("t1", "done")
+	sb.finishTool("t1", "success")
 	got := sb.build(80, -1)
 	if !strings.Contains(got, "● Bash") || !strings.Contains(got, "✓") || !strings.Contains(got, "done") {
 		t.Fatalf("tool block styling missing:\n%s", got)
 	}
 }
 
-func TestUsageBlockRemoved(t *testing.T) {
+// TestUsageNotRenderedInScrollback — M6a Commit B: usage (ModelCallEnd) updates
+// cumulative tokens in the status line only; it is never added to the
+// scrollback. Appending text + a usage event must not surface a [tokens] block.
+func TestUsageNotRenderedInScrollback(t *testing.T) {
 	var sb scrollback
-	sb.appendUsage(event.Usage{InputTokens: 1, OutputTokens: 2, Model: "gpt-4o"})
-	if got := sb.build(80, -1); strings.Contains(got, "gpt-4o") || strings.Contains(got, "[tokens") {
-		t.Fatalf("usage block should not render:\n%s", got)
+	sb.appendUser("hi")
+	if got := sb.build(80, -1); strings.Contains(got, "[tokens") {
+		t.Fatalf("scrollback should not render a usage block:\n%s", got)
 	}
 }
 

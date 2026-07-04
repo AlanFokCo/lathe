@@ -5,30 +5,26 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/alanfokco/lathe/internal/event"
+	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
 )
 
-// RenderStreamJSON writes one JSON object per event to out (NDJSON).
-func RenderStreamJSON(ctx context.Context, ch <-chan event.Event, out io.Writer) {
+// RenderStreamJSON writes one JSON object per agentscope event to out (NDJSON).
+// Each line is `{"type":"<event_type>", ...event fields...}` so consumers can
+// discriminate on type (agentscope events don't include type in their own JSON).
+func RenderStreamJSON(ctx context.Context, ch <-chan asevent.Event, out io.Writer) {
 	enc := json.NewEncoder(out)
 	for ev := range ch {
-		obj := map[string]any{"type": ev.Kind()}
-		switch e := ev.(type) {
-		case event.TextDelta:
-			obj["delta"] = e.Delta
-		case event.ToolCallStart:
-			obj["id"], obj["name"], obj["input"] = e.ID, e.Name, e.Input
-		case event.ToolResult:
-			obj["id"], obj["name"], obj["output"], obj["state"], obj["diff"] = e.ID, e.Name, e.Output, e.State, e.Diff
-		case event.Usage:
-			obj["input_tokens"], obj["output_tokens"], obj["model"] = e.InputTokens, e.OutputTokens, e.Model
-			obj["cache_creation_tokens"], obj["cache_read_tokens"] = e.CacheCreationTokens, e.CacheReadTokens
-		case event.ReplyEnd:
-			obj["reason"] = e.Reason
-		case event.ErrorEvent:
-			obj["error"] = e.Err.Error()
+		raw, err := json.Marshal(ev)
+		if err != nil {
+			continue
 		}
-		if err := enc.Encode(obj); err != nil {
+		var m map[string]any
+		_ = json.Unmarshal(raw, &m)
+		if m == nil {
+			m = map[string]any{}
+		}
+		m["type"] = string(ev.GetEventType())
+		if err := enc.Encode(m); err != nil {
 			return
 		}
 	}

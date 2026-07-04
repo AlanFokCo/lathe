@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
 	"github.com/alanfokco/lathe/internal/config"
-	"github.com/alanfokco/lathe/internal/event"
 	"github.com/alanfokco/lathe/internal/settings"
 	"github.com/alanfokco/lathe/internal/statusline"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -19,9 +19,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// EngineControl is the subset of *agent.Engine the TUI depends on.
+// EngineControl is the subset of *agent.Engine the TUI depends on. M6a Commit
+// B: Run returns a channel of agentscope events (no translator/internal/event).
 type EngineControl interface {
-	Run(ctx context.Context, prompt string) <-chan event.Event
+	Run(ctx context.Context, prompt string) <-chan asevent.Event
 	SetModel(name string) error
 	ListModels() []string
 	ModelName() string
@@ -55,7 +56,7 @@ type model struct {
 	state          modelState
 	ctx            context.Context
 	cancel         context.CancelFunc
-	eventCh        <-chan event.Event
+	eventCh        <-chan asevent.Event
 	cumIn          int
 	cumOut         int
 	pendingTool    string
@@ -64,8 +65,6 @@ type model struct {
 	spinner        spinner.Model
 	phase          activityPhase
 	curTool        string
-	step           int
-	maxStep        int
 	width          int
 	height         int
 	viewport       viewport.Model
@@ -201,7 +200,7 @@ func (m *model) sbAppendUser(s string) {
 }
 
 // eventMsg wraps one engine event for the bubbletea Update loop.
-type eventMsg struct{ ev event.Event }
+type eventMsg struct{ ev asevent.Event }
 
 // streamEndMsg is sent when the engine event channel closes.
 type streamEndMsg struct{}
@@ -215,7 +214,7 @@ func scheduleFormatTick() tea.Cmd {
 	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return formatTickMsg{} })
 }
 
-func waitForEvent(ch <-chan event.Event) tea.Cmd {
+func waitForEvent(ch <-chan asevent.Event) tea.Cmd {
 	return func() tea.Msg {
 		ev, ok := <-ch
 		if !ok {
@@ -315,7 +314,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, c
 	case eventMsg:
 		m.handleEvent(msg.ev)
-		if _, end := msg.ev.(event.ReplyEnd); end {
+		if _, end := msg.ev.(asevent.ReplyEndEvent); end {
 			m.state = stateIdle
 			m.cancel = nil
 			return m, m.scheduleStatusLine()
@@ -352,35 +351,45 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *model) handleEvent(ev event.Event) {
+// handleEvent consumes an agentscope block-lifecycle event (M6a Commit B).
+// TextBlockDelta defers its rebuild to the 120ms formatTick (returns early);
+// all other events rebuild immediately.
+func (m *model) handleEvent(ev asevent.Event) {
 	switch e := ev.(type) {
-	case event.TextDelta:
+	case asevent.TextBlockDeltaEvent:
 		m.sb.appendAssistantText(e.Delta)
 		m.dirty = true // M6a: defer the O(blocks) rebuild to the 120ms formatTick
 		return
-	case event.TurnStep:
+	case asevent.ModelCallStartEvent:
 		m.phase = phaseThinking
-		m.step = e.Iter
-		m.maxStep = e.MaxIters
-	case event.ToolCallStart:
-		m.sb.appendTool(e.ID, e.Name, e.Input)
-		m.phase = phaseRunning
-		m.curTool = e.Name
-	case event.ToolResult:
-		m.sb.finishTool(e.ID, e.Output, e.State, e.Diff)
-		m.phase = phaseThinking
-	case event.Usage:
-		m.sb.appendUsage(e)
+	case asevent.ModelCallEndEvent:
 		m.cumIn += e.InputTokens
 		m.cumOut += e.OutputTokens
-	case event.ErrorEvent:
-		m.sb.appendError(e.Err)
-	case event.Compacted:
-		m.sb.appendUser(fmt.Sprintf("context compressed: %d→%d tokens", e.Before, e.After))
-	case event.RequireApproval:
-		m.pendingTool = e.ToolName
+	case asevent.ToolCallStartEvent:
+		// agentscope's ToolCallStartEvent carries only ID+Name (no Input).
+		m.sb.appendTool(e.ToolCallID, e.ToolCallName, "")
+		m.phase = phaseRunning
+		m.curTool = e.ToolCallName
+	case asevent.ToolResultTextDeltaEvent:
+		m.sb.appendToolResultDelta(e.ToolCallID, e.Delta)
+	case asevent.ToolResultEndEvent:
+		m.sb.finishTool(e.ToolCallID, string(e.State))
+		m.phase = phaseThinking
+	case asevent.RequireUserConfirmEvent:
+		if len(e.ToolCalls) > 0 {
+			m.pendingTool = e.ToolCalls[0].Name
+		}
 		m.state = stateAwaitingApproval
-	case event.ReplyEnd:
+	case asevent.CustomEvent:
+		switch e.Name {
+		case "compacted":
+			m.sb.appendUser(fmt.Sprintf("context compressed: %v→%v tokens", e.Value["before"], e.Value["after"]))
+		case "error":
+			if errMsg, ok := e.Value["error"].(string); ok {
+				m.sb.appendError(fmt.Errorf("%s", errMsg))
+			}
+		}
+	case asevent.ReplyEndEvent:
 		m.sb.finishAssistant()
 		m.phase = phaseIdle
 	}
@@ -449,7 +458,8 @@ func (m *model) statusLine() string {
 }
 
 // activityLine returns the live progress line shown while a turn runs:
-// "⠋ thinking · step N/max" or "⠋ running <tool> · step N/max". Empty when idle.
+// "⠋ thinking" or "⠋ running <tool>". Empty when idle. (M6a Commit B: dropped
+// the step N/max display — agentscope has no TurnStep/iter event.)
 func (m *model) activityLine() string {
 	if m.state != stateRunning {
 		return ""
@@ -458,11 +468,7 @@ func (m *model) activityLine() string {
 	if m.phase == phaseRunning {
 		label = "running " + m.curTool
 	}
-	out := m.spinner.View() + " " + label
-	if m.maxStep > 0 {
-		out += " · step " + fmt.Sprintf("%d/%d", m.step, m.maxStep)
-	}
-	return out
+	return m.spinner.View() + " " + label
 }
 
 // maybeSlash handles /help /clear /quit /model /config. Returns (cmd, true) if

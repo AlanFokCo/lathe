@@ -1,6 +1,7 @@
-// Package render turns the lathe event stream into output. text.go is the
-// human-readable print-mode view; streamjson.go is the NDJSON view. The M2
-// TUI will be a third consumer of the same event stream.
+// Package render turns the agentscope event stream into output. text.go is the
+// human-readable print-mode view; streamjson.go is the NDJSON view. M6a Commit
+// B: consumes agentscope block-lifecycle events directly (no translator, no
+// internal/event).
 package render
 
 import (
@@ -9,26 +10,43 @@ import (
 	"io"
 	"strings"
 
-	"github.com/alanfokco/lathe/internal/event"
+	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
 )
 
 // RenderText writes streamed text to out (stdout) and tool/usage annotations
-// to errOut (stderr).
-func RenderText(ctx context.Context, ch <-chan event.Event, out, errOut io.Writer) {
+// to errOut (stderr). Tool-result text deltas are accumulated per tool-call ID
+// and flushed as one "↳ output" line on ToolResultEnd.
+func RenderText(ctx context.Context, ch <-chan asevent.Event, out, errOut io.Writer) {
+	pending := map[string]*strings.Builder{} // toolCallID → accumulated output
+	var modelName string
 	for ev := range ch {
 		switch e := ev.(type) {
-		case event.TextDelta:
+		case asevent.TextBlockDeltaEvent:
 			fmt.Fprint(out, e.Delta)
-		case event.ToolCallStart:
-			fmt.Fprintf(errOut, "⏺ %s(%s)\n", e.Name, strings.TrimSpace(e.Input))
-		case event.ToolResult:
-			fmt.Fprintf(errOut, "  ↳ %s\n", strings.TrimSpace(e.Output))
-		case event.Usage:
-			fmt.Fprintf(errOut, "[tokens in=%d out=%d model=%s]\n", e.InputTokens, e.OutputTokens, e.Model)
-		case event.ReplyEnd:
+		case asevent.ModelCallStartEvent:
+			modelName = e.ModelName
+		case asevent.ModelCallEndEvent:
+			fmt.Fprintf(errOut, "[tokens in=%d out=%d model=%s]\n", e.InputTokens, e.OutputTokens, modelName)
+		case asevent.ToolCallStartEvent:
+			// agentscope's ToolCallStartEvent carries only ID+Name (no Input).
+			fmt.Fprintf(errOut, "⏺ %s()\n", e.ToolCallName)
+		case asevent.ToolResultStartEvent:
+			if _, ok := pending[e.ToolCallID]; !ok {
+				pending[e.ToolCallID] = &strings.Builder{}
+			}
+		case asevent.ToolResultTextDeltaEvent:
+			if b, ok := pending[e.ToolCallID]; ok {
+				b.WriteString(e.Delta)
+			}
+		case asevent.ToolResultEndEvent:
+			var outText string
+			if b, ok := pending[e.ToolCallID]; ok {
+				outText = b.String()
+				delete(pending, e.ToolCallID)
+			}
+			fmt.Fprintf(errOut, "  ↳ %s\n", strings.TrimSpace(outText))
+		case asevent.ReplyEndEvent:
 			fmt.Fprintln(out)
-		case event.ErrorEvent:
-			fmt.Fprintf(errOut, "error: %v\n", e.Err)
 		}
 	}
 }

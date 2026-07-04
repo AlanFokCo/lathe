@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	agentscope "github.com/alanfokco/agentscope-go/pkg/agentscope"
+	asagent "github.com/alanfokco/agentscope-go/pkg/agentscope/agent"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/mcp"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
+	"github.com/alanfokco/agentscope-go/pkg/agentscope/middleware"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/resilience"
@@ -23,31 +26,38 @@ import (
 	"github.com/alanfokco/lathe/internal/workspace"
 )
 
-// Engine is lathe's turn engine. It is NOT a wrapper around UnifiedAgent;
-// it drives model.ChatStream directly in its own loop.
+// Engine is lathe's turn engine. M6a: it is a thin product shell over the
+// agentscope UnifiedAgent — it holds the agent plus lathe's product-layer
+// concerns (session JSONL, mcp/skill discovery, settings hooks, statusline),
+// and Run translates the agent's block-lifecycle events into lathe's event
+// stream (temporary; Commit B deletes the translator + internal/event).
 type Engine struct {
 	name            string
-	chatModel       model.ChatModel
+	chatModel       model.ChatModel // resilience-wrapped; for CompressNow/StatusInfo
+	agent           *asagent.UnifiedAgent
 	toolkit         *tool.Toolkit
 	permEng         *permission.Engine
+	configuredMode  permission.PermissionMode // cfg.Permission; SetInteractive toggles effective mode
 	maxIters        int
-	conv            []*message.Msg
+	state           *asagent.AgentState // shared with the agent (via WithState); holds Context
+	sysPrompt       string              // cached; for CompressNow's compression messages
 	cfg             *config.Config
 	compressCfg     compressConfig
 	session         *session.Session
-	interactive     bool
-	approvalCh      chan string
 	mcpClients      []mcp.Client
 	hookRunner      *hooks.Runner
 	workspaceCloser func() error
 	cwd             string             // M5b: cwd snapshot for statusline payload
 	settings        *settings.Settings // M5b: parsed settings (for StatusLineConfig)
-	readCache       *tool.ReadCache    // M6a: read-before-write guard, injected per turn
+	readCache       *tool.ReadCache    // M6a: read-before-write guard, injected via WithReadCache
+	pendingMu       sync.Mutex
+	pending         *pendingApproval // HITL bridge: last RequireUserConfirm
 }
 
 // NewEngine assembles an Engine from a resolved config (production path:
 // builds a real ChatModel for the configured provider). The system prompt is
-// built once at construction (env + tool descriptions + project memory).
+// built once at construction (env + tool descriptions + project memory); M6b
+// will move it to an OnSystemPrompt middleware.
 func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	agentscope.Init()
 	cm, err := buildChatModel(cfg)
@@ -55,15 +65,15 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		return nil, err
 	}
 	tk := tool.NewEnhancedToolkit()
-	permCtx := permission.NewContext(permission.PermissionMode(cfg.Permission))
+	configuredMode := permission.PermissionMode(cfg.Permission)
+	permCtx := permission.NewContext(printEffectiveMode(configuredMode))
 	permEng := permission.NewEngine(permCtx)
 
-	// M6a: one ReadCache per engine, injected into each turn's ctx so the base
+	// M6a: one ReadCache per engine, injected via WithReadCache so the base
 	// Write/Edit read-before-write guard activates.
 	readCache := tool.NewReadCache(0, 0)
 
 	// M4a: discover skills (user ~/.lathe/skills + project .lathe/skills walk-up).
-	// Registered here so all paths (new/resume/continue) expose the Skill tool.
 	cwd := mustCwd()
 	skillsList, _ := skills.Discover(cwd)
 	if len(skillsList) > 0 {
@@ -109,68 +119,152 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	// subagent shares the same workspace (no escape).
 	tk.AddGroup("task", NewTaskTool(cm, permEng, cfg.MaxIters, subToolkit))
 
-	// resume an existing session?
-	if cfg.Resume != "" {
-		sess, conv, err := session.Load(cfg.Resume)
-		if err != nil {
-			return nil, fmt.Errorf("resume: %w", err)
-		}
-		return &Engine{
-			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
-			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
-			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
-			cwd: cwd, settings: settingsCfg, readCache: readCache,
-		}, nil
-	}
-	if cfg.Continue {
-		sess, conv, err := session.Latest(mustCwd())
-		if err != nil {
-			return nil, fmt.Errorf("continue: %w", err)
-		}
-		return &Engine{
-			name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
-			maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
-			conv: conv, session: sess, mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
-			cwd: cwd, settings: settingsCfg, readCache: readCache,
-		}, nil
-	}
-
 	skillsSection := ""
 	if len(skillsList) > 0 {
 		skillsSection = skill.FormatSkillInstructions(skillsList)
 	}
-	sysMsg := message.SystemMsg("lathe", buildSystemPrompt(cwd, tk, loadMemoryFiles(cwd), skillsSection))
-	sess, _ := session.New(cwd, cfg.Model) // best-effort; nil on failure → no persistence
+	sysPrompt := buildSystemPrompt(cwd, tk, loadMemoryFiles(cwd), skillsSection)
+
+	// resolve session + state.Context: resume/continue load history; fresh
+	// starts empty. The system prompt is NOT in state.Context — agentscope
+	// prepends its own from sysPrompt (dropLeadingSystem strips a legacy
+	// system-role conv[0] from old transcripts).
+	var sess *session.Session
+	var stateCtx []*message.Msg
+	if cfg.Resume != "" {
+		s, conv, err := session.Load(cfg.Resume)
+		if err != nil {
+			return nil, fmt.Errorf("resume: %w", err)
+		}
+		sess = s
+		stateCtx = dropLeadingSystem(conv)
+	} else if cfg.Continue {
+		s, conv, err := session.Latest(cwd)
+		if err != nil {
+			return nil, fmt.Errorf("continue: %w", err)
+		}
+		sess = s
+		stateCtx = dropLeadingSystem(conv)
+	} else {
+		s, _ := session.New(cwd, cfg.Model) // best-effort; nil on failure → no persistence
+		sess = s
+		if sess != nil {
+			_ = sess.SaveMeta()
+		}
+	}
+
+	state := &asagent.AgentState{Context: stateCtx}
+	if sess != nil {
+		state.SessionID = sess.ID
+	} else {
+		state.SessionID = agentscope.GenerateID()
+	}
+
 	e := &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
-		maxIters: cfg.MaxIters, cfg: cfg, compressCfg: defaultCompressConfig(),
-		session: sess, approvalCh: make(chan string, 1), mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
+		configuredMode: configuredMode, maxIters: cfg.MaxIters,
+		state: state, sysPrompt: sysPrompt, cfg: cfg,
+		compressCfg: defaultCompressConfig(), session: sess,
+		mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
 		cwd: cwd, settings: settingsCfg, readCache: readCache,
 	}
-	if sess != nil {
-		_ = sess.SaveMeta()
-	}
-	e.appendConv(sysMsg)
+	e.assembleAgent()
 	return e, nil
+}
+
+// assembleAgent builds (or rebuilds) the UnifiedAgent from the Engine's fields.
+// Called once at construction; SetModel re-invokes it to swap the model while
+// preserving state.Context (passed back via WithState).
+func (e *Engine) assembleAgent() {
+	opts := []asagent.AgentOption{
+		asagent.WithToolkit(e.toolkit),
+		asagent.WithReadCache(e.readCache),
+		asagent.WithContextConfig(toContextConfig(e.compressCfg)),
+		asagent.WithReactConfig(asagent.ReactConfig{MaxIters: e.maxIters}),
+		asagent.WithMiddlewares(&toolResultRoleMiddleware{
+			BaseMiddleware: middleware.BaseMiddleware{MiddlewareKey: "lathe-toolresult-role"},
+		}),
+		asagent.WithState(e.state),
+		asagent.WithLoopHooks(&persistHook{e: e, saved: len(e.state.Context)}),
+	}
+	if e.permEng != nil {
+		opts = append(opts, asagent.WithPermissionContext(e.permEng.Context))
+	}
+	e.agent = asagent.NewUnifiedAgent(e.name, e.sysPrompt, e.chatModel, opts...)
+}
+
+// toContextConfig maps lathe's compressConfig to agentscope's ContextConfig
+// (agentscope owns auto-compact; lathe's compressConfig stays as the source of
+// defaults and for CompressNow). Defaults mirror agentscope's withDefaults.
+func toContextConfig(cfg compressConfig) *asagent.ContextConfig {
+	return &asagent.ContextConfig{
+		TriggerRatio:      cfg.TriggerRatio,
+		ReserveRatio:      cfg.ReserveRatio,
+		ContextSize:       cfg.ContextSize,
+		CompressionPrompt: cfg.CompressionPrompt,
+		SummaryTemplate:   cfg.SummaryTemplate,
+		SummarySchema:     cfg.SummarySchema,
+		ToolResultLimit:   cfg.ToolResultLimit,
+	}
+}
+
+// dropLeadingSystem drops a leading system-role message so a resumed legacy
+// transcript (which stored the system prompt as conv[0]) does not double up
+// with the system prompt agentscope prepends in prepareModelInput.
+func dropLeadingSystem(conv []*message.Msg) []*message.Msg {
+	if len(conv) > 0 && conv[0] != nil && conv[0].Role == message.RoleSystem {
+		return conv[1:]
+	}
+	return conv
 }
 
 // newEngineForTest wires an Engine with an injected model/toolkit/engine.
 func newEngineForTest(cm model.ChatModel, tk *tool.Toolkit, eng *permission.Engine, maxIters int) *Engine {
 	agentscope.Init()
-	return &Engine{
+	configuredMode := eng.Context.Mode
+	// Hermetic tests are non-interactive: collapse default/accept_edits to
+	// dont_ask (no-op for the bypass engines the tests actually inject).
+	eng.Context.Mode = printEffectiveMode(configuredMode)
+	e := &Engine{
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: eng,
-		maxIters:    maxIters,
-		conv:        []*message.Msg{message.SystemMsg("lathe", buildSystemPrompt("", tk, "", ""))},
+		configuredMode: configuredMode, maxIters: maxIters,
+		state:       &asagent.AgentState{SessionID: agentscope.GenerateID()},
+		sysPrompt:   buildSystemPrompt("", tk, "", ""),
 		cfg:         &config.Config{Provider: "openai", Model: "test-model", APIKey: "k"},
 		compressCfg: defaultCompressConfig(),
-		approvalCh:  make(chan string, 1),
 		readCache:   tool.NewReadCache(0, 0),
 	}
+	e.assembleAgent()
+	return e
 }
 
-// SetModel switches the chat model (same provider, new model name). The new
-// model is rebuilt from the stored config; conversation history is preserved.
-// Unknown model names are accepted (the API layer reports the error on next call).
+// newSubagentEngine builds a non-interactive nested Engine for the Task tool.
+// It shares the parent's chat model + a copy of the parent's permission Context
+// (rule maps shared, mode forced to the print-effective mode so an Ask cannot
+// hang). M6b will replace this with UnifiedAgent.Spawn.
+func newSubagentEngine(name, sysPrompt string, cm model.ChatModel, tk *tool.Toolkit, parentPermEng *permission.Engine, maxIters int) *Engine {
+	agentscope.Init()
+	e := &Engine{
+		name: name, chatModel: cm, toolkit: tk,
+		maxIters: maxIters, cfg: &config.Config{},
+		compressCfg: defaultCompressConfig(),
+		state:       &asagent.AgentState{SessionID: agentscope.GenerateID()},
+		sysPrompt:   sysPrompt, readCache: tool.NewReadCache(0, 0),
+	}
+	if parentPermEng != nil {
+		ctxCopy := *parentPermEng.Context // shallow copy: shares rule maps, separate Mode
+		ctxCopy.Mode = printEffectiveMode(ctxCopy.Mode)
+		e.permEng = permission.NewEngine(&ctxCopy)
+		e.configuredMode = parentPermEng.Context.Mode
+	}
+	e.assembleAgent()
+	return e
+}
+
+// SetModel switches the chat model (same provider, new model name). The agent
+// is rebuilt (same state.Context/toolkit) so the new model takes effect on the
+// next Run. Unknown model names are accepted (the API layer reports the error
+// on next call).
 func (e *Engine) SetModel(name string) error {
 	e.cfg.Model = name
 	cm, err := buildChatModel(e.cfg)
@@ -178,6 +272,7 @@ func (e *Engine) SetModel(name string) error {
 		return err
 	}
 	e.chatModel = cm
+	e.assembleAgent() // rebuild ucm + agent; persistHook.saved = len(state.Context)
 	return nil
 }
 
@@ -213,19 +308,6 @@ func (e *Engine) StatusLineConfig() *settings.StatusLineConfig {
 		return nil
 	}
 	return e.settings.StatusLine
-}
-
-// SetInteractive enables (TUI) or disables (print) interactive approval.
-func (e *Engine) SetInteractive(b bool) { e.interactive = b }
-
-// SubmitApproval delivers the user's approval decision ("allow"/"deny"/"always")
-// to unblock a paused dispatch. Called by the TUI after a RequireApproval event.
-func (e *Engine) SubmitApproval(decision string) {
-	select {
-	case e.approvalCh <- decision:
-	default:
-		// no pending approval; drop (TUI state machine prevents stray calls)
-	}
 }
 
 // Close releases engine resources, including MCP client connections. It is

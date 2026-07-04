@@ -41,7 +41,8 @@ func TestPrintIntegrationStreamJSON(t *testing.T) {
 	ch := eng.Run(context.Background(), "hi")
 	out := &bytes.Buffer{}
 	render.RenderStreamJSON(context.Background(), ch, out)
-	if !strings.Contains(out.String(), `"type":"text_delta"`) {
+	// M6a Commit B: stream-json emits agentscope event types (text_block_delta).
+	if !strings.Contains(out.String(), `"type":"text_block_delta"`) {
 		t.Fatalf("output: %s", out.String())
 	}
 	// sanity: ensure the first line decodes as JSON
