@@ -17,6 +17,7 @@ import (
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/resilience"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/skill"
 	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
+	"github.com/sirupsen/logrus"
 	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/hooks"
 	"github.com/alanfokco/lathe/internal/mcpconfig"
@@ -59,7 +60,7 @@ type Engine struct {
 // built once at construction (env + tool descriptions + project memory); M6b
 // will move it to an OnSystemPrompt middleware.
 func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
-	agentscope.Init()
+	initAgentscope()
 	cm, err := buildChatModel(cfg)
 	if err != nil {
 		return nil, err
@@ -181,9 +182,10 @@ func (e *Engine) assembleAgent() {
 		asagent.WithReadCache(e.readCache),
 		asagent.WithContextConfig(toContextConfig(e.compressCfg)),
 		asagent.WithReactConfig(asagent.ReactConfig{MaxIters: e.maxIters}),
-		asagent.WithMiddlewares(&toolResultRoleMiddleware{
-			BaseMiddleware: middleware.BaseMiddleware{MiddlewareKey: "lathe-toolresult-role"},
-		}),
+		asagent.WithMiddlewares(
+			&toolResultRoleMiddleware{BaseMiddleware: middleware.BaseMiddleware{MiddlewareKey: "lathe-toolresult-role"}},
+			&shellHookMiddleware{BaseMiddleware: middleware.BaseMiddleware{MiddlewareKey: "lathe-shellhook"}, e: e},
+		),
 		asagent.WithState(e.state),
 		asagent.WithLoopHooks(&persistHook{e: e, saved: len(e.state.Context)}),
 	}
@@ -220,7 +222,7 @@ func dropLeadingSystem(conv []*message.Msg) []*message.Msg {
 
 // newEngineForTest wires an Engine with an injected model/toolkit/engine.
 func newEngineForTest(cm model.ChatModel, tk *tool.Toolkit, eng *permission.Engine, maxIters int) *Engine {
-	agentscope.Init()
+	initAgentscope()
 	configuredMode := eng.Context.Mode
 	// Hermetic tests are non-interactive: collapse default/accept_edits to
 	// dont_ask (no-op for the bypass engines the tests actually inject).
@@ -243,7 +245,7 @@ func newEngineForTest(cm model.ChatModel, tk *tool.Toolkit, eng *permission.Engi
 // (rule maps shared, mode forced to the print-effective mode so an Ask cannot
 // hang). M6b will replace this with UnifiedAgent.Spawn.
 func newSubagentEngine(name, sysPrompt string, cm model.ChatModel, tk *tool.Toolkit, parentPermEng *permission.Engine, maxIters int) *Engine {
-	agentscope.Init()
+	initAgentscope()
 	e := &Engine{
 		name: name, chatModel: cm, toolkit: tk,
 		maxIters: maxIters, cfg: &config.Config{},
@@ -324,6 +326,17 @@ func (e *Engine) Close() error {
 	}
 	e.workspaceCloser = nil
 	return nil
+}
+
+// initAgentscope initializes agentscope and dampens its log verbosity. v3
+// imports agentscope's agent package, whose httpx client logs every request at
+// DEBUG (forwarded to stdout via the LogrusToSlogHook, which bypasses the slog
+// level filter by calling Handler.Handle directly). Setting the logrus level to
+// INFO drops those DEBUG entries before the hook fires (logrus filters before
+// firing hooks), keeping lathe's stdout — especially stream-json NDJSON — clean.
+func initAgentscope() {
+	agentscope.Init()
+	agentscope.Log().SetLevel(logrus.InfoLevel)
 }
 
 func buildChatModel(cfg *config.Config) (model.ChatModel, error) {

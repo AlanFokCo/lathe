@@ -486,3 +486,49 @@ func TestEngineInjectsReadCache(t *testing.T) {
 		t.Fatalf("ReadCache not injected into tool ctx: %+v", tr)
 	}
 }
+
+// TestEnginePreToolUseHookBlocks — M6b: a PreToolUse hook returning
+// {"decision":"block"} denies the tool call (shellHookMiddleware restores the
+// PreToolUse boundary that v3 lost when dispatch.go was deleted).
+func TestEnginePreToolUseHookBlocks(t *testing.T) {
+	m := &fakeModel{turns: [][]model.ChatResponse{
+		{finalChunk(&model.ChatUsage{}, toolCallBlock("t1", "echo", `{"msg":"hi"}`))},
+		{textChunk("done"), finalChunk(&model.ChatUsage{})},
+	}}
+	eng := newEngineForTest(m, echoToolkit(), bypassEngine(), 10)
+	eng.hookRunner = hooks.NewRunner(map[string][]settings.Matcher{
+		"PreToolUse": {{Matcher: "echo", Hooks: []settings.Command{{Type: "command", Command: `printf '{"decision":"block","reason":"no"}'`}}}},
+	}, "/tmp", "")
+	d := drainAll(eng.Run(context.Background(), "call echo"))
+	tr, ok := d.tools["t1"]
+	if !ok {
+		t.Fatalf("no tool result: %+v", d.tools)
+	}
+	if tr.state != "denied" {
+		t.Fatalf("state: %s (want denied)", tr.state)
+	}
+	if !strings.Contains(tr.output, "blocked by hook") {
+		t.Fatalf("output: %q", tr.output)
+	}
+}
+
+// TestEnginePostToolUseHookInjectsContext — M6b: a PostToolUse hook returning
+// {"additionalContext":"..."} appends to the tool output (shellHookMiddleware).
+func TestEnginePostToolUseHookInjectsContext(t *testing.T) {
+	m := &fakeModel{turns: [][]model.ChatResponse{
+		{finalChunk(&model.ChatUsage{}, toolCallBlock("t1", "echo", `{"msg":"hi"}`))},
+		{textChunk("done"), finalChunk(&model.ChatUsage{})},
+	}}
+	eng := newEngineForTest(m, echoToolkit(), bypassEngine(), 10)
+	eng.hookRunner = hooks.NewRunner(map[string][]settings.Matcher{
+		"PostToolUse": {{Matcher: "echo", Hooks: []settings.Command{{Type: "command", Command: `printf '{"additionalContext":"CTX-ADDED"}'`}}}},
+	}, "/tmp", "")
+	d := drainAll(eng.Run(context.Background(), "call echo"))
+	tr, ok := d.tools["t1"]
+	if !ok {
+		t.Fatalf("no tool result: %+v", d.tools)
+	}
+	if !strings.Contains(tr.output, "echoed: hi") || !strings.Contains(tr.output, "CTX-ADDED") {
+		t.Fatalf("output missing echo/context: %q", tr.output)
+	}
+}
