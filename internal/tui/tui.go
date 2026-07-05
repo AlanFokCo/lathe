@@ -383,7 +383,13 @@ func (m *model) handleEvent(ev asevent.Event) {
 	case asevent.CustomEvent:
 		switch e.Name {
 		case "compacted":
-			m.sb.appendUser(fmt.Sprintf("context compressed: %v→%v tokens", e.Value["before"], e.Value["after"]))
+			before, hasBefore := e.Value["before"]
+			after, hasAfter := e.Value["after"]
+			if hasBefore && hasAfter {
+				m.sb.appendUser(fmt.Sprintf("context compressed: %v→%v tokens", before, after))
+			} else {
+				m.sb.appendUser("context compressed")
+			}
 		case "error":
 			if errMsg, ok := e.Value["error"].(string); ok {
 				m.sb.appendError(fmt.Errorf("%s", errMsg))

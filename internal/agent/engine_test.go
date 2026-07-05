@@ -235,7 +235,8 @@ func TestEngineMultiTurnConversationPersists(t *testing.T) {
 }
 
 func TestEngineAutoCompactEmitsEvent(t *testing.T) {
-	t.Skip("M6b: Compacted event emission deferred — agentscope auto-compress runs via WithContextConfig; the compact-signal middleware (CustomEvent) is M6b")
+	// M6b: agentscope's replyLoop detects compression (state.Summary change)
+	// and emits a CustomEvent("compacted"); lathe surfaces it (tui/stream-json).
 	m := &compressFakeModel{tokenCount: 200000} // over threshold → auto-compress
 	eng := newEngineForTest(m, tool.NewToolkit(), bypassEngine(), 10)
 	eng.state.Context = append(eng.state.Context, message.UserMsg("u", "old1"), message.UserMsg("u", "old2"))
