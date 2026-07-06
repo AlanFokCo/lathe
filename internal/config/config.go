@@ -39,14 +39,15 @@ type Config struct {
 	CircuitBreakerThreshold int     // consecutive failures before the breaker opens (default 5)
 	RateLimitPerSec         float64 // model calls/sec (0 = unlimited)
 	RateBurst               int     // burst allowance for the rate limiter
+	Theme                   string  // M6b: TUI theme name (lathe-dark | light)
 }
 
 // Flags holds CLI overrides; empty fields are unset.
 type Flags struct {
-	Provider, Model, APIKey, BaseURL, Permission, Output, Prompt, Sandbox string
-	MaxIters                                                              int
-	Resume                                                                string
-	Continue                                                              bool
+	Provider, Model, APIKey, BaseURL, Permission, Output, Prompt, Sandbox, Theme string
+	MaxIters                                                                     int
+	Resume                                                                       string
+	Continue                                                                     bool
 }
 
 // Load resolves a Config from flags + env + defaults.
@@ -59,7 +60,13 @@ func Load(f Flags) (*Config, error) {
 		Resume:                  f.Resume,
 		Continue:                f.Continue,
 		Sandbox:                 f.Sandbox,
-		CircuitBreakerThreshold: 5, // M6a: default breaker threshold
+		CircuitBreakerThreshold: 5,            // M6a: default breaker threshold
+		Theme:                   "lathe-dark", // M6b: default theme
+	}
+	if f.Theme != "" {
+		cfg.Theme = f.Theme
+	} else if e := os.Getenv("LATHE_THEME"); e != "" {
+		cfg.Theme = e
 	}
 	if f.Permission != "" {
 		cfg.Permission = f.Permission

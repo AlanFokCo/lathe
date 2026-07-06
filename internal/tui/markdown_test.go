@@ -42,16 +42,20 @@ func TestRenderMarkdownPlain(t *testing.T) {
 }
 
 func TestRendererCachedPerWidth(t *testing.T) {
-	r1, err := rendererFor(80)
+	r1, err := rendererFor(80, "dark")
 	if err != nil {
 		t.Fatal(err)
 	}
-	r2, _ := rendererFor(80)
+	r2, _ := rendererFor(80, "dark")
 	if r1 != r2 {
-		t.Fatal("same width should return the cached renderer instance")
+		t.Fatal("same (width,style) should return the cached renderer instance")
 	}
-	r3, _ := rendererFor(100)
+	r3, _ := rendererFor(100, "dark")
 	if r1 == r3 {
 		t.Fatal("different width should return a different renderer")
+	}
+	r4, _ := rendererFor(80, "light")
+	if r1 == r4 {
+		t.Fatal("different style should return a different renderer")
 	}
 }

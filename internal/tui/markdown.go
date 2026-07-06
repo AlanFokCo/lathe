@@ -1,43 +1,42 @@
 package tui
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/charmbracelet/glamour"
 )
 
-// rendererCache memoizes one glamour renderer per wrap width. glamour.NewTermRenderer
+// rendererCache memoizes one glamour renderer per (width, style). glamour.NewTermRenderer
 // parses style JSON + inits chroma, so rebuilding it per call (per token, per block)
-// was real CPU/GC waste under the streaming rebuild. Keyed by width (style is fixed
-// "dark" until the M6b theme system parameterizes it).
+// was real CPU/GC waste under the streaming rebuild.
 var (
 	rendererMu    sync.Mutex
-	rendererCache = map[int]*glamour.TermRenderer{}
+	rendererCache = map[string]*glamour.TermRenderer{}
 )
 
-func rendererFor(width int) (*glamour.TermRenderer, error) {
+func rendererFor(width int, style string) (*glamour.TermRenderer, error) {
+	key := fmt.Sprintf("%d|%s", width, style)
 	rendererMu.Lock()
 	defer rendererMu.Unlock()
-	if r, ok := rendererCache[width]; ok {
+	if r, ok := rendererCache[key]; ok {
 		return r, nil
 	}
 	r, err := glamour.NewTermRenderer(
 		glamour.WithWordWrap(width),
-		glamour.WithStandardStyle("dark"),
+		glamour.WithStandardStyle(style),
 	)
 	if err != nil {
 		return nil, err
 	}
-	rendererCache[width] = r
+	rendererCache[key] = r
 	return r, nil
 }
 
-// RenderMarkdown renders md as ANSI-styled Markdown at width (M5c-2). On any
-// error it returns the raw md unchanged (non-fatal — the caller falls back to
-// raw text). M6a: uses a per-width cached renderer to avoid rebuilding glamour
-// (style JSON parse + chroma init) on every call during streaming.
+// RenderMarkdown renders md as ANSI-styled Markdown at width using the current
+// theme's glamour style (M6b). On any error it returns md unchanged (non-fatal).
 func RenderMarkdown(md string, width int) string {
-	r, err := rendererFor(width)
+	r, err := rendererFor(width, curTheme.GlamourStyle)
 	if err != nil {
 		return md
 	}

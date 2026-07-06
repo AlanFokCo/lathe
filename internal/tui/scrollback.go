@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/alanfokco/lathe/internal/tui/theme"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -20,8 +21,8 @@ const (
 // M6a Commit B: tool output is accumulated from ToolResultTextDeltaEvent by
 // tool-call ID (appendToolResultDelta), then finishTool marks done.
 type block struct {
-	kind      blockKind
-	text      string // assistant: full raw streamed text
+	kind blockKind
+	text string // assistant: full raw streamed text
 	// assistant streaming state (M5d):
 	committed string // glamour(text[:commitLen]) cache
 	commitLen int    // committed byte offset
@@ -106,16 +107,34 @@ func (s *scrollback) appendError(err error) {
 
 func (s *scrollback) clear() { s.blocks = nil; s.lastAssistant = 0 }
 
+// M6b: styles are driven by the active theme. curTheme + the style vars are
+// package-level and mutated only from the bubbletea Update goroutine (startup
+// via init, and /theme switch), so no synchronization is needed.
 var (
-	userStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	toolStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	successStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	warnStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	promptStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	// M5d: selected tool block highlight.
-	selectedToolStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	curTheme = theme.Dark()
+
+	userStyle         lipgloss.Style
+	toolStyle         lipgloss.Style
+	errorStyle        lipgloss.Style
+	successStyle      lipgloss.Style
+	warnStyle         lipgloss.Style
+	promptStyle       lipgloss.Style
+	selectedToolStyle lipgloss.Style
 )
+
+func init() { applyTheme(curTheme) }
+
+// applyTheme sets the package-level styles + curTheme from th.
+func applyTheme(th theme.Theme) {
+	curTheme = th
+	userStyle = lipgloss.NewStyle().Foreground(th.User)
+	toolStyle = lipgloss.NewStyle().Foreground(th.Tool)
+	errorStyle = lipgloss.NewStyle().Foreground(th.Error)
+	successStyle = lipgloss.NewStyle().Foreground(th.Success)
+	warnStyle = lipgloss.NewStyle().Foreground(th.Warn)
+	promptStyle = lipgloss.NewStyle().Foreground(th.User)
+	selectedToolStyle = lipgloss.NewStyle().Bold(true).Foreground(th.Accent)
+}
 
 // build produces the full scrollback content string at width (M5d). Replaces
 // the old render+formatPending. glamour runs ONLY here, and only when a
@@ -136,7 +155,7 @@ func (s *scrollback) build(width, selectedTool int) string {
 		case kindTool:
 			body = s.buildTool(bl, width, selectedTool == i) // M5d: highlight selected tool block
 		case kindError:
-			body = errorStyle.Render("\nerror: "+bl.text+"\n")
+			body = errorStyle.Render("\nerror: " + bl.text + "\n")
 		}
 		b.WriteString(body)
 		line += strings.Count(body, "\n")
@@ -197,7 +216,7 @@ func (s *scrollback) buildTool(bl *block, width int, selected bool) string {
 		b.WriteString("\n")
 		return b.String()
 	}
-	b.WriteString("   (e 收起)\n")
+	b.WriteString("   (e to collapse)\n")
 	if bl.diff != "" {
 		b.WriteString(indentBlock(wrapRaw(bl.diff, width-2), "  ") + "\n")
 	}

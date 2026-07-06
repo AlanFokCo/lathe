@@ -13,7 +13,7 @@ import (
 var version = "0.1.0"
 
 func newRootCmd() *cobra.Command {
-	var prompt, provider, model, apiKey, baseURL, permissionMode, output string
+	var prompt, provider, model, apiKey, baseURL, permissionMode, output, themeName string
 	var maxIters int
 	var resumeID string
 	var doContinue bool
@@ -35,12 +35,13 @@ func newRootCmd() *cobra.Command {
 	root.Flags().StringVar(&resumeID, "resume", "", "resume session <id>")
 	root.Flags().BoolVar(&doContinue, "continue", false, "continue most recent session in cwd")
 	root.Flags().StringVar(&sandbox, "sandbox", "", "none|docker|e2b (default none = local execution)")
+	root.Flags().StringVar(&themeName, "theme", "", "TUI theme: lathe-dark|light")
 
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load(config.Flags{
 			Provider: provider, Model: model, APIKey: apiKey, BaseURL: baseURL,
 			Permission: permissionMode, Output: output, MaxIters: maxIters, Prompt: prompt,
-			Resume: resumeID, Continue: doContinue, Sandbox: sandbox,
+			Resume: resumeID, Continue: doContinue, Sandbox: sandbox, Theme: themeName,
 		})
 		if err != nil {
 			return err

@@ -13,6 +13,7 @@ import (
 	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/settings"
 	"github.com/alanfokco/lathe/internal/statusline"
+	"github.com/alanfokco/lathe/internal/tui/theme"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -75,6 +76,7 @@ type model struct {
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
+	applyTheme(theme.Get(cfg.Theme)) // M6b: resolve the TUI theme
 	ta := textarea.New()
 	ta.Prompt = ""             // M5c-2: drop the default "┃ " vertical line below the input
 	ta.ShowLineNumbers = false // M5c-2: drop the line-number gutter
