@@ -517,6 +517,7 @@ func buildChatModel(cfg *config.Config) (model.ChatModel, error) {
 	case "anthropic":
 		cm, err = model.NewAnthropicChatModel(&model.AnthropicConfig{
 			APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model, MaxOutputTokens: 8192,
+			PromptCaching: cfg.PromptCaching, // M8a
 		})
 	case "openai":
 		cm, err = model.NewOpenAIChatModel(model.OpenAIConfig{

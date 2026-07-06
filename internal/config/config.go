@@ -46,6 +46,7 @@ type Config struct {
 	ThinkingBudget          int     // M7a: thinking token budget (0 = provider default)
 	ReasoningEffort         string  // M7b: OpenAI reasoning effort ("low"|"medium"|"high"); "" = provider default
 	Jail                    bool    // M7f: confine file tools to cwd via tool.WithWorkspaceRoot
+	PromptCaching           bool    // M8a: enable Anthropic prompt caching (system + tools)
 }
 
 // Flags holds CLI overrides; empty fields are unset.
@@ -58,6 +59,7 @@ type Flags struct {
 	ThinkingBudget                                                               int    // M7a
 	Effort                                                                       string // M7b: reasoning effort
 	Jail                                                                         bool   // M7f: --jail
+	PromptCaching                                                                bool   // M8a: --prompt-caching
 }
 
 // Load resolves a Config from flags + env + defaults.
@@ -118,6 +120,14 @@ func Load(f Flags) (*Config, error) {
 	cfg.Jail = f.Jail
 	if !cfg.Jail && envTruthy(os.Getenv("LATHE_JAIL")) {
 		cfg.Jail = true
+	}
+	// M8a: Anthropic prompt caching. Flag > env; default off so wire format
+	// stays byte-identical for callers who do not opt in. Non-Anthropic
+	// providers ignore the flag (buildChatModel only threads it into the
+	// AnthropicConfig).
+	cfg.PromptCaching = f.PromptCaching
+	if !cfg.PromptCaching && envTruthy(os.Getenv("LATHE_PROMPT_CACHING")) {
+		cfg.PromptCaching = true
 	}
 
 	if f.Provider != "" {

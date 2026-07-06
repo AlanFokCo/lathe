@@ -22,6 +22,7 @@ func newRootCmd() *cobra.Command {
 	var thinkingBudget int
 	var effort string
 	var jail bool
+	var promptCaching bool
 
 	root := &cobra.Command{
 		Use:     "lathe",
@@ -44,6 +45,7 @@ func newRootCmd() *cobra.Command {
 	root.Flags().IntVar(&thinkingBudget, "thinking-budget", 0, "extended-thinking token budget (default 4096 when --thinking)")
 	root.Flags().StringVar(&effort, "effort", "", "OpenAI reasoning effort: low|medium|high (M7b)")
 	root.Flags().BoolVar(&jail, "jail", false, "confine file tools to cwd (workspace-root jail, M7f)")
+	root.Flags().BoolVar(&promptCaching, "prompt-caching", false, "Anthropic prompt caching for system+tools (M8a)")
 
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load(config.Flags{
@@ -51,7 +53,7 @@ func newRootCmd() *cobra.Command {
 			Permission: permissionMode, Output: output, MaxIters: maxIters, Prompt: prompt,
 			Resume: resumeID, Continue: doContinue, Sandbox: sandbox, Theme: themeName,
 			Thinking: thinking, ThinkingBudget: thinkingBudget, Effort: effort,
-			Jail: jail,
+			Jail: jail, PromptCaching: promptCaching,
 		})
 		if err != nil {
 			return err

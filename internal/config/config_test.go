@@ -240,6 +240,44 @@ func TestLoadJailDefaultOff(t *testing.T) {
 	}
 }
 
+// TestLoadPromptCachingFlag — M8a: --prompt-caching / LATHE_PROMPT_CACHING
+// resolve into cfg.PromptCaching. Off by default; only takes effect against
+// the Anthropic provider.
+func TestLoadPromptCachingFlag(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	cfg, err := Load(Flags{Prompt: "hi", PromptCaching: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.PromptCaching {
+		t.Fatal("--prompt-caching not propagated")
+	}
+}
+
+func TestLoadPromptCachingEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	t.Setenv("LATHE_PROMPT_CACHING", "1")
+	cfg, err := Load(Flags{Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.PromptCaching {
+		t.Fatal("LATHE_PROMPT_CACHING=1 not honored")
+	}
+}
+
+func TestLoadPromptCachingDefaultOff(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	t.Setenv("LATHE_PROMPT_CACHING", "")
+	cfg, err := Load(Flags{Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PromptCaching {
+		t.Fatal("PromptCaching should default off")
+	}
+}
+
 func TestLoadOllamaMissingModel(t *testing.T) {
 	cfg, err := Load(Flags{Provider: "ollama"})
 	if err != nil {
