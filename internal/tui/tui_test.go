@@ -851,3 +851,34 @@ func TestSearchBarInView(t *testing.T) {
 		t.Fatal("view should show the search query")
 	}
 }
+
+// M10f: lastAssistantText returns the most recent assistant block text.
+func TestLastAssistantText(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+	if m.lastAssistantText() != "" {
+		t.Fatal("no assistant blocks yet, should be empty")
+	}
+	m.sb.appendAssistantText("first reply")
+	m.sb.finishAssistant()
+	m.sb.appendUser("a user prompt")
+	m.sb.appendAssistantText("second reply")
+	m.sb.finishAssistant()
+	if got := m.lastAssistantText(); got != "second reply" {
+		t.Fatalf("want 'second reply', got %q", got)
+	}
+}
+
+// M10f: Ctrl+Y in idle with assistant text shows "(copied to clipboard)".
+func TestCtrlYCopy(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+	m.width = 80
+	m.height = 24
+	m.sb.appendAssistantText("hello world")
+	m.sb.finishAssistant()
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	if !strings.Contains(m.sb.build(80, -1), "copied to clipboard") {
+		t.Fatal("Ctrl+Y should confirm copy in scrollback")
+	}
+}

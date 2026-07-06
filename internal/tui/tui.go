@@ -5,8 +5,10 @@ package tui
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -461,6 +463,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		// M10f: Ctrl+Y copies last assistant text to clipboard (OSC-52).
+		if msg.Type == tea.KeyCtrlY && m.state == stateIdle {
+			if text := m.lastAssistantText(); text != "" {
+				oscCopy(text)
+				m.sbAppendUser("(copied to clipboard)")
+				m.rebuild()
+			}
+			return m, nil
+		}
 		// M10e: Ctrl+F search mode — intercept keys before normal dispatch.
 		if m.searchActive {
 			return m.handleSearchKey(msg), nil
@@ -644,6 +655,9 @@ func (m *model) handleEvent(ev asevent.Event) {
 	case asevent.ReplyEndEvent:
 		m.sb.finishAssistant()
 		m.phase = phaseIdle
+		if m.cfg.Notify {
+			notifyTurnDone()
+		}
 	}
 	m.rebuild() // M5d: refresh viewport content after every event
 }
@@ -1061,4 +1075,31 @@ func (m *model) cyclePermissionMode() {
 		m.engine.SetPermissionMode("accept_edits")
 		m.sbAppendUser("mode: accept_edits")
 	}
+}
+
+// lastAssistantText returns the text of the most recent assistant block, or ""
+// if there is none (M10f).
+func (m *model) lastAssistantText() string {
+	for i := len(m.sb.blocks) - 1; i >= 0; i-- {
+		if m.sb.blocks[i].kind == kindAssistant {
+			return m.sb.blocks[i].text
+		}
+	}
+	return ""
+}
+
+// oscCopy writes an OSC-52 clipboard-set sequence to stderr (M10f). Terminal
+// emulators that support OSC-52 (kitty, iTerm2, WezTerm, ghostty) will copy
+// the text to the system clipboard. Writing to stderr avoids bubbletea's
+// stdout lock.
+func oscCopy(text string) {
+	b64 := base64.StdEncoding.EncodeToString([]byte(text))
+	fmt.Fprintf(os.Stderr, "\x1b]52;c;%s\x07", b64)
+}
+
+// notifyTurnDone sends an OSC-9 desktop notification + BEL so the user's
+// terminal alerts them when a turn finishes (M10f). Best-effort; no-op on
+// terminals that do not support OSC-9.
+func notifyTurnDone() {
+	fmt.Fprint(os.Stderr, "\x1b]9;lathe: turn done\x07\a")
 }

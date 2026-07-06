@@ -49,6 +49,7 @@ type Config struct {
 	PromptCaching           bool    // M8a: enable Anthropic prompt caching (system + tools)
 	CompactRatio            float64 // M9d: fraction of context that triggers auto-compact (0 = disabled)
 	ContextSize             int     // M9d: model context window override in tokens (0 = model-card default)
+	Notify                  bool    // M10f: OSC-9 notification + bell on turn end
 }
 
 // Flags holds CLI overrides; empty fields are unset.
@@ -64,6 +65,7 @@ type Flags struct {
 	PromptCaching                                                                bool    // M8a: --prompt-caching
 	CompactRatio                                                                 float64 // M9d: --compact-ratio
 	ContextSize                                                                  int     // M9d: --context-size
+	Notify                                                                       bool    // M10f: --notify
 }
 
 // Load resolves a Config from flags + env + TOML + defaults (M9e). Resolution
@@ -154,6 +156,11 @@ func Load(f Flags) (*Config, error) {
 		cfg.CompactRatio = 0.95
 	}
 	cfg.ContextSize = f.ContextSize
+	// M10f: OSC-9 notification. Flag > env; default off.
+	cfg.Notify = f.Notify
+	if !cfg.Notify && envTruthy(os.Getenv("LATHE_NOTIFY")) {
+		cfg.Notify = true
+	}
 
 	if f.Provider != "" {
 		cfg.Provider = f.Provider
