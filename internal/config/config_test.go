@@ -278,6 +278,40 @@ func TestLoadPromptCachingDefaultOff(t *testing.T) {
 	}
 }
 
+// TestLoadCompactRatioFlag — M9d: --compact-ratio and --context-size flow
+// through into cfg, letting users tune auto-compact without editing code.
+func TestLoadCompactRatioFlag(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	cfg, err := Load(Flags{Prompt: "hi", CompactRatio: 0.6, ContextSize: 200000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CompactRatio != 0.6 {
+		t.Fatalf("CompactRatio = %v, want 0.6", cfg.CompactRatio)
+	}
+	if cfg.ContextSize != 200000 {
+		t.Fatalf("ContextSize = %d, want 200000", cfg.ContextSize)
+	}
+}
+
+func TestLoadCompactRatioClamps(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	cfg, err := Load(Flags{Prompt: "hi", CompactRatio: 1.5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CompactRatio != 0.95 {
+		t.Fatalf("above 1.0 should clamp to 0.95, got %v", cfg.CompactRatio)
+	}
+	cfg2, err := Load(Flags{Prompt: "hi", CompactRatio: -0.5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg2.CompactRatio != 0 {
+		t.Fatalf("negative should clamp to 0 (disabled), got %v", cfg2.CompactRatio)
+	}
+}
+
 func TestLoadOllamaMissingModel(t *testing.T) {
 	cfg, err := Load(Flags{Provider: "ollama"})
 	if err != nil {

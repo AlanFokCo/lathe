@@ -8,6 +8,7 @@ import (
 
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/model"
+	"github.com/alanfokco/lathe/internal/config"
 )
 
 // compressConfig controls when/how lathe compresses its conversation. Defaults
@@ -31,6 +32,23 @@ func defaultCompressConfig() compressConfig {
 		SummarySchema:     defaultSummarySchema,
 		ToolResultLimit:   50000,
 	}
+}
+
+// buildCompressConfig returns defaults with cfg-driven overrides applied
+// (M9d): --compact-ratio and --context-size. When cfg is nil the defaults
+// are returned unchanged.
+func buildCompressConfig(cfg *config.Config) compressConfig {
+	cc := defaultCompressConfig()
+	if cfg == nil {
+		return cc
+	}
+	if cfg.CompactRatio > 0 {
+		cc.TriggerRatio = cfg.CompactRatio
+	}
+	if cfg.ContextSize > 0 {
+		cc.ContextSize = cfg.ContextSize
+	}
+	return cc
 }
 
 const defaultCompressionPrompt = "<system-hint>You have been working on the task described above " +

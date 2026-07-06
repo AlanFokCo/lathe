@@ -210,7 +210,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		name: "lathe", chatModel: cm, toolkit: tk, permEng: permEng,
 		configuredMode: configuredMode, maxIters: cfg.MaxIters,
 		state: state, sysPrompt: sysPrompt, cfg: cfg,
-		compressCfg: defaultCompressConfig(), session: sess,
+		compressCfg: buildCompressConfig(cfg), session: sess,
 		mcpClients: mcpClients, mcpServers: mcpServers, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
 		cwd: cwd, settings: settingsCfg, readCache: readCache,
 		taskCtx: taskCtx, thinker: thk, efforter: ef,

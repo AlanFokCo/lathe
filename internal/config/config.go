@@ -47,6 +47,8 @@ type Config struct {
 	ReasoningEffort         string  // M7b: OpenAI reasoning effort ("low"|"medium"|"high"); "" = provider default
 	Jail                    bool    // M7f: confine file tools to cwd via tool.WithWorkspaceRoot
 	PromptCaching           bool    // M8a: enable Anthropic prompt caching (system + tools)
+	CompactRatio            float64 // M9d: fraction of context that triggers auto-compact (0 = disabled)
+	ContextSize             int     // M9d: model context window override in tokens (0 = model-card default)
 }
 
 // Flags holds CLI overrides; empty fields are unset.
@@ -55,11 +57,13 @@ type Flags struct {
 	MaxIters                                                                     int
 	Resume                                                                       string
 	Continue                                                                     bool
-	Thinking                                                                     bool   // M7a
-	ThinkingBudget                                                               int    // M7a
-	Effort                                                                       string // M7b: reasoning effort
-	Jail                                                                         bool   // M7f: --jail
-	PromptCaching                                                                bool   // M8a: --prompt-caching
+	Thinking                                                                     bool    // M7a
+	ThinkingBudget                                                               int     // M7a
+	Effort                                                                       string  // M7b: reasoning effort
+	Jail                                                                         bool    // M7f: --jail
+	PromptCaching                                                                bool    // M8a: --prompt-caching
+	CompactRatio                                                                 float64 // M9d: --compact-ratio
+	ContextSize                                                                  int     // M9d: --context-size
 }
 
 // Load resolves a Config from flags + env + defaults.
@@ -129,6 +133,18 @@ func Load(f Flags) (*Config, error) {
 	if !cfg.PromptCaching && envTruthy(os.Getenv("LATHE_PROMPT_CACHING")) {
 		cfg.PromptCaching = true
 	}
+	// M9d: auto-compact tuning. Ratio clamps to [0, 0.95] so a stray 1.0
+	// setting cannot disable compression by never triggering. Negative
+	// values disable it entirely (0). ContextSize is passed through raw;
+	// the engine falls back to the model card when it is 0.
+	cfg.CompactRatio = f.CompactRatio
+	if cfg.CompactRatio < 0 {
+		cfg.CompactRatio = 0
+	}
+	if cfg.CompactRatio > 0.95 {
+		cfg.CompactRatio = 0.95
+	}
+	cfg.ContextSize = f.ContextSize
 
 	if f.Provider != "" {
 		cfg.Provider = f.Provider

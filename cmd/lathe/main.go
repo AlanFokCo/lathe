@@ -23,6 +23,8 @@ func newRootCmd() *cobra.Command {
 	var effort string
 	var jail bool
 	var promptCaching bool
+	var compactRatio float64
+	var contextSize int
 
 	root := &cobra.Command{
 		Use:     "lathe",
@@ -46,6 +48,8 @@ func newRootCmd() *cobra.Command {
 	root.Flags().StringVar(&effort, "effort", "", "OpenAI reasoning effort: low|medium|high (M7b)")
 	root.Flags().BoolVar(&jail, "jail", false, "confine file tools to cwd (workspace-root jail, M7f)")
 	root.Flags().BoolVar(&promptCaching, "prompt-caching", false, "Anthropic prompt caching for system+tools (M8a)")
+	root.Flags().Float64Var(&compactRatio, "compact-ratio", 0, "auto-compact when conversation hits this fraction of context (0=default 0.8, M9d)")
+	root.Flags().IntVar(&contextSize, "context-size", 0, "override model context window in tokens (0=model card default, M9d)")
 
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load(config.Flags{
@@ -54,6 +58,7 @@ func newRootCmd() *cobra.Command {
 			Resume: resumeID, Continue: doContinue, Sandbox: sandbox, Theme: themeName,
 			Thinking: thinking, ThinkingBudget: thinkingBudget, Effort: effort,
 			Jail: jail, PromptCaching: promptCaching,
+			CompactRatio: compactRatio, ContextSize: contextSize,
 		})
 		if err != nil {
 			return err
