@@ -12,7 +12,7 @@ func TestScrollbackBuildsTextAndTool(t *testing.T) {
 	sb.appendAssistantText("lo")
 	sb.appendTool("t1", "Read", `{"path":"x"}`)
 	sb.appendToolResultDelta("t1", "line1\nline2\nline3")
-	sb.finishTool("t1", "success")
+	sb.finishTool("t1", "success", "")
 
 	got := sb.build(80, -1)
 	for _, want := range []string{"do X", "Hello", "Read", "●", "3 lines", "[✓]"} {
@@ -96,7 +96,7 @@ func TestToolBlockStyled(t *testing.T) {
 	var sb scrollback
 	sb.appendTool("t1", "Bash", `{"command":"ls"}`)
 	sb.appendToolResultDelta("t1", "done")
-	sb.finishTool("t1", "success")
+	sb.finishTool("t1", "success", "")
 	got := sb.build(80, -1)
 	if !strings.Contains(got, "● Bash") || !strings.Contains(got, "✓") || !strings.Contains(got, "done") {
 		t.Fatalf("tool block styling missing:\n%s", got)
@@ -111,6 +111,23 @@ func TestUsageNotRenderedInScrollback(t *testing.T) {
 	sb.appendUser("hi")
 	if got := sb.build(80, -1); strings.Contains(got, "[tokens") {
 		t.Fatalf("scrollback should not render a usage block:\n%s", got)
+	}
+}
+
+// TestToolDiffRenderedAndSummarized — M6b: an Edit tool block with diff metadata
+// shows the colored diff when expanded and a "+N -M" diffstat when collapsed.
+func TestToolDiffRendered(t *testing.T) {
+	var sb scrollback
+	sb.appendTool("t1", "Edit", `{"path":"x.go"}`)
+	sb.appendToolResultDelta("t1", "Replaced 1 occurrence(s)")
+	sb.finishTool("t1", "success", "--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-old\n+new\n")
+	if got := stripANSI(sb.build(80, -1)); !strings.Contains(got, "edited +1 -1") {
+		t.Fatalf("collapsed Edit summary missing diffstat:\n%s", got)
+	}
+	sb.blocks[0].expanded = true
+	got := stripANSI(sb.build(80, -1))
+	if !strings.Contains(got, "+new") || !strings.Contains(got, "-old") {
+		t.Fatalf("expanded Edit block missing diff text:\n%s", got)
 	}
 }
 

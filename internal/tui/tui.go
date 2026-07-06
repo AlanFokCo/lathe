@@ -368,14 +368,17 @@ func (m *model) handleEvent(ev asevent.Event) {
 		m.cumIn += e.InputTokens
 		m.cumOut += e.OutputTokens
 	case asevent.ToolCallStartEvent:
-		// agentscope's ToolCallStartEvent carries only ID+Name (no Input).
-		m.sb.appendTool(e.ToolCallID, e.ToolCallName, "")
+		// M6b: ToolCallStartEvent now carries the tool's JSON input (enriched
+		// upstream) — used for the header arg + lexer selection.
+		m.sb.appendTool(e.ToolCallID, e.ToolCallName, e.ToolCallInput)
 		m.phase = phaseRunning
 		m.curTool = e.ToolCallName
 	case asevent.ToolResultTextDeltaEvent:
 		m.sb.appendToolResultDelta(e.ToolCallID, e.Delta)
 	case asevent.ToolResultEndEvent:
-		m.sb.finishTool(e.ToolCallID, string(e.State))
+		// M6b: tool-result Metadata (enriched upstream) carries the Edit/Write
+		// diff, rendered by the colored-diff renderer.
+		m.sb.finishTool(e.ToolCallID, string(e.State), diffFromMeta(e.Metadata))
 		m.phase = phaseThinking
 	case asevent.RequireUserConfirmEvent:
 		if len(e.ToolCalls) > 0 {
@@ -402,6 +405,18 @@ func (m *model) handleEvent(ev asevent.Event) {
 		m.phase = phaseIdle
 	}
 	m.rebuild() // M5d: refresh viewport content after every event
+}
+
+// diffFromMeta extracts a unified diff from a tool-result event's metadata
+// (Edit/Write set Metadata["diff"] upstream). Empty when absent. M6b.
+func diffFromMeta(m map[string]any) string {
+	if m == nil {
+		return ""
+	}
+	if d, ok := m["diff"].(string); ok {
+		return d
+	}
+	return ""
 }
 
 // statusLineMsg carries the result of an async statusline command run.

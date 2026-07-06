@@ -88,12 +88,13 @@ func (s *scrollback) appendToolResultDelta(id, delta string) {
 
 // finishTool marks the matching (by tool-call ID) unfinished tool block done
 // and caches its one-line summary (M5d, M6a Commit B).
-func (s *scrollback) finishTool(id, state string) {
+func (s *scrollback) finishTool(id, state, diff string) {
 	for i := len(s.blocks) - 1; i >= 0; i-- {
 		if s.blocks[i].kind == kindTool && s.blocks[i].toolID == id && !s.blocks[i].done {
 			b := &s.blocks[i]
 			b.toolState = state
-			b.summary = summarize(b.toolName, b.toolOut, state, b.diff)
+			b.diff = diff
+			b.summary = summarize(b.toolName, b.toolOut, state, diff)
 			b.done = true
 			return
 		}
@@ -199,7 +200,7 @@ func (s *scrollback) buildAssistant(bl *block, width int) string {
 // output + diff inlined). M5d. selected highlights the bullet (Task 5 wiring).
 func (s *scrollback) buildTool(bl *block, width int, selected bool) string {
 	var b strings.Builder
-	args := strings.TrimSpace(bl.toolIn)
+	args := toolHeaderArg(bl.toolName, bl.toolIn)
 	marker := "● "
 	style := toolStyle
 	if selected {
@@ -218,9 +219,14 @@ func (s *scrollback) buildTool(bl *block, width int, selected bool) string {
 	}
 	b.WriteString("   (e to collapse)\n")
 	if bl.diff != "" {
-		b.WriteString(indentBlock(wrapRaw(bl.diff, width-2), "  ") + "\n")
+		b.WriteString(indentBlock(renderDiff(bl.diff, width-2, curTheme), "  ") + "\n")
 	}
 	if out := strings.TrimSpace(bl.toolOut); out != "" {
+		if bl.toolName == "Read" {
+			if fn := filenameFromToolInput(bl.toolIn); fn != "" {
+				out = highlightCode(out, fn, curTheme)
+			}
+		}
 		b.WriteString(indentBlock(wrapRaw(out, width-2), "  ") + "\n")
 	}
 	return b.String()
