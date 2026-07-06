@@ -145,6 +145,11 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		tool.TaskUpdateTool(),
 	)
 
+	// M7c: LSP tool. Lazy — spawns gopls/tsserver/pylsp on first call, rooted
+	// at cwd so goToDefinition / findReferences / hover / symbols work over
+	// the current project. Ships builtin defaults for go/typescript/python.
+	tk.AddGroup("lsp", tool.LSPTool(tool.WithLSPRootDir(cwd)))
+
 	skillsSection := ""
 	if len(skillsList) > 0 {
 		skillsSection = skill.FormatSkillInstructions(skillsList)

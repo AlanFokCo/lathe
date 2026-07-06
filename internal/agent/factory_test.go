@@ -292,6 +292,28 @@ func TestEngineToolNamesReportsFullInventory(t *testing.T) {
 	}
 }
 
+// TestNewEngineRegistersLSPTool — M7c: LSPTool is exposed under group "lsp"
+// with cwd as the LSP root, giving the model semantic navigation (definitions,
+// references, hover, symbols) via gopls/tsserver/pylsp. The tool itself is
+// lazy: it only spawns the language server on the first LSP call.
+func TestNewEngineRegistersLSPTool(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "proj")
+	mustMkdir(t, work)
+	t.Setenv("HOME", home)
+	t.Chdir(work)
+
+	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "bypass", MaxIters: 10}
+	eng, err := NewEngine(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	if eng.toolkit.Get("LSP") == nil {
+		t.Fatal("LSP tool not registered")
+	}
+}
+
 // TestNewEngineRegistersTaskToolkit — M6h: TodoWrite tools (task_create/
 // task_get/task_list/task_update) are wired so the model can maintain a live
 // per-session task list. They rely on TaskContext being in ctx, so this only
