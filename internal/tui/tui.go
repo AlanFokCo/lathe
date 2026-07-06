@@ -120,14 +120,18 @@ func (m *model) wrapWidth() int {
 
 func (m *model) Init() tea.Cmd { return tea.Batch(m.input.Focus(), m.scheduleStatusLine()) }
 
-// submit starts a turn: appends the user prompt, runs the engine, begins pumping.
+// submit starts a turn: appends the user prompt (as typed, for the scrollback)
+// and dispatches the expanded prompt (M7d.1 @file expansion applied) to the
+// engine. Preserving the raw typed version in scrollback keeps the display
+// clean; the model still sees the inlined file contents.
 func (m *model) submit(prompt string) tea.Cmd {
 	m.sbAppendUser(prompt)
+	expanded := expandAtFiles(prompt, m.cwd)
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx, m.cancel = ctx, cancel
 	m.state = stateRunning
 	m.turnStart = time.Now() // M6c: for elapsed + tok/s in the activity line
-	m.eventCh = m.engine.Run(ctx, prompt)
+	m.eventCh = m.engine.Run(ctx, expanded)
 	return tea.Batch(waitForEvent(m.eventCh), m.spinner.Tick, scheduleFormatTick())
 }
 
