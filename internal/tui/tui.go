@@ -115,7 +115,9 @@ type model struct {
 	searchQuery    string                      // M10e: current search string
 	searchIdx      int                         // M10e: current match index (for next/prev)
 	filepick       *filePicker                 // M9c: @file autocomplete backend
-	pickerCursor   int                         // M9c: selected file-picker match index
+	pickerCursor   int
+	vimNormal      bool // M10i: true = normal mode, false = insert mode
+	vimPending     rune // M10i: first key of a multi-key command (e.g. 'd' for dd)
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
@@ -557,6 +559,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			return m, m.submit(text)
 		}
+		// M10i: Esc when idle -> enter vim normal mode
+		if m.state == stateIdle && msg.Type == tea.KeyEscape {
+			m.vimNormal = true
+			return m, nil
+		}
+		// M10i: vim normal mode -- handle motion/edit keys, block runes from textarea
+		if m.vimNormal && m.state == stateIdle && msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+			m.handleVimNormal(msg.Runes[0])
+			return m, nil
+		}
 		var c tea.Cmd
 		m.input, c = m.input.Update(msg)
 		m.paletteCursor = 0 // M6c-3: typing re-filters, reset palette selection
@@ -910,7 +922,11 @@ func redactKey(k string) string {
 }
 
 func (m *model) View() string {
-	bottom := m.statusLine() + "\n" + promptStyle.Render("> ") + m.input.View()
+	vimTag := ""
+	if m.vimNormal {
+		vimTag = warnStyle.Render("NORMAL") + " "
+	}
+	bottom := m.statusLine() + "\n" + vimTag + promptStyle.Render("> ") + m.input.View()
 	if m.state == stateAwaitingApproval {
 		return m.viewport.View() + "\n" + m.approvalBar() + "\n" + bottom
 	}

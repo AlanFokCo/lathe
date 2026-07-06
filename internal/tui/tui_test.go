@@ -975,3 +975,161 @@ func TestDiffStatEmpty(t *testing.T) {
 		t.Fatal("empty diff should return empty string")
 	}
 }
+
+// --- M10i: vim mode tests ---
+
+func vimModel() *model {
+	m := newModel(&fakeControl{model: "gpt-4o", permMode: "default"}, testCfg())
+	m.input.Focus()
+	return m
+}
+
+func TestVimEscEntersNormalMode(t *testing.T) {
+	m := vimModel()
+	if m.vimNormal {
+		t.Fatal("should start in insert mode")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	if !m.vimNormal {
+		t.Fatal("Esc should enter normal mode")
+	}
+}
+
+func TestVimIReturnsToInsertMode(t *testing.T) {
+	m := vimModel()
+	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	if m.vimNormal {
+		t.Fatal("i should return to insert mode")
+	}
+}
+
+func TestVimNormalBlocksCharInsertion(t *testing.T) {
+	m := vimModel()
+	m.input.SetValue("hello")
+	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if strings.Contains(m.input.Value(), "x") {
+		t.Fatalf("normal mode should not insert chars, got %q", m.input.Value())
+	}
+}
+
+func TestVimHLMovement(t *testing.T) {
+	m := vimModel()
+	m.input.SetValue("abcdef")
+	m.input.CursorEnd()
+	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+
+	startCol := m.input.LineInfo().CharOffset
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	after := m.input.LineInfo().CharOffset
+	if after >= startCol {
+		t.Fatalf("h should move left: %d -> %d", startCol, after)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if m.input.LineInfo().CharOffset != startCol {
+		t.Fatalf("l should move right back: %d -> %d", after, m.input.LineInfo().CharOffset)
+	}
+}
+
+func TestVim0Dollar(t *testing.T) {
+	m := vimModel()
+	m.input.SetValue("hello world")
+	m.input.SetCursor(5)
+	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
+	if m.input.LineInfo().CharOffset != 0 {
+		t.Fatalf("0 should go to start, got offset %d", m.input.LineInfo().CharOffset)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'$'}})
+	if m.input.LineInfo().CharOffset == 0 {
+		t.Fatal("$ should move to end of line")
+	}
+}
+
+func TestVimWBWordMotion(t *testing.T) {
+	m := vimModel()
+	m.input.SetValue("one two three")
+	m.input.CursorStart()
+	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+	col := m.input.LineInfo().CharOffset
+	if col < 2 {
+		t.Fatalf("w should advance past first word, col=%d", col)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	col2 := m.input.LineInfo().CharOffset
+	if col2 >= col {
+		t.Fatalf("b should move back, col=%d -> %d", col, col2)
+	}
+}
+
+func TestVimXDeletesChar(t *testing.T) {
+	m := vimModel()
+	m.input.SetValue("abcdef")
+	m.input.SetCursor(2)
+	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	got := m.input.Value()
+	if len(got) != 5 {
+		t.Fatalf("x should delete exactly one char: len=%d val=%q", len(got), got)
+	}
+}
+
+func TestVimDDClearsLine(t *testing.T) {
+	m := vimModel()
+	m.input.SetValue("delete me")
+	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if m.input.Value() != "" {
+		t.Fatalf("dd should clear input, got %q", m.input.Value())
+	}
+}
+
+func TestVimAEntersInsertAndAdvances(t *testing.T) {
+	m := vimModel()
+	m.input.SetValue("abc")
+	m.input.SetCursor(1)
+	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+
+	before := m.input.LineInfo().CharOffset
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	if m.vimNormal {
+		t.Fatal("a should enter insert mode")
+	}
+	after := m.input.LineInfo().CharOffset
+	if after <= before {
+		t.Fatalf("a should advance cursor: %d -> %d", before, after)
+	}
+}
+
+func TestVimModeIndicatorInView(t *testing.T) {
+	m := vimModel()
+	if strings.Contains(m.View(), "NORMAL") {
+		t.Fatal("insert mode should not show NORMAL")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	if !strings.Contains(m.View(), "NORMAL") {
+		t.Fatalf("normal mode should show NORMAL in view:\n%s", m.View())
+	}
+}
+
+func TestVimEscDuringRunningStillCancels(t *testing.T) {
+	m := vimModel()
+	m.submit("hi")
+	if m.state != stateRunning {
+		t.Fatalf("state: %v", m.state)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	if m.ctx == nil || m.ctx.Err() == nil {
+		t.Fatal("Esc during running should still cancel engine")
+	}
+	if m.vimNormal {
+		t.Fatal("Esc during running should not enter vim normal mode")
+	}
+}
