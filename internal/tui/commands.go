@@ -35,6 +35,9 @@ func commands() []command {
 		{"model", "show or switch the model", func(m *model, rest string) tea.Cmd { return m.handleModel(rest) }},
 		{"theme", "show or switch the theme (lathe-dark|light)", func(m *model, rest string) tea.Cmd { return m.handleTheme(rest) }},
 		{"config", "show the resolved config", func(m *model, _ string) tea.Cmd { m.sbAppendUser(configString(m.cfg)); return nil }},
+		{"cost", "show token usage (input/output/cache)", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.costText()); return nil }},
+		{"doctor", "diagnose provider/model/config", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.doctorText()); return nil }},
+		{"init", "scaffold a CLAUDE.md in the cwd", func(m *model, _ string) tea.Cmd { return m.handleInit() }},
 		{"quit", "exit lathe", func(m *model, _ string) tea.Cmd { return tea.Quit }},
 	}
 }

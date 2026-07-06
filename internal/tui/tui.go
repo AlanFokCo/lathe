@@ -77,6 +77,8 @@ type model struct {
 	lastIn         int       // M6c: last ModelCallEnd InputTokens ≈ context used
 	ctxSize        int       // M6c: model context-window size (from StatusInfo)
 	paletteCursor  int       // M6c-3: selected index in the slash command palette
+	cumCacheR      int       // M6c-4: cumulative cache-read tokens
+	cumCacheW      int       // M6c-4: cumulative cache-creation tokens
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
@@ -409,6 +411,8 @@ func (m *model) handleEvent(ev asevent.Event) {
 		m.cumIn += e.InputTokens
 		m.cumOut += e.OutputTokens
 		m.lastIn = e.InputTokens // M6c: last request's input ≈ current context usage
+		m.cumCacheR += e.CacheReadTokens
+		m.cumCacheW += e.CacheCreationTokens
 	case asevent.ToolCallStartEvent:
 		// M6b: ToolCallStartEvent now carries the tool's JSON input (enriched
 		// upstream) — used for the header arg + lexer selection.
