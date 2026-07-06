@@ -313,8 +313,9 @@ func (m *model) handleThinking(rest string) tea.Cmd {
 	return nil
 }
 
-// handlePlan parses /plan [on|off] and toggles read-only plan mode (M7g).
-// Empty args → report current state.
+// handlePlan parses /plan [on|off|approve] and toggles read-only plan mode
+// (M7g). M10b: "approve" exits plan mode + switches to accept_edits for
+// seamless plan→execute transition. Empty args → report current state.
 func (m *model) handlePlan(rest string) tea.Cmd {
 	rest = strings.TrimSpace(strings.ToLower(rest))
 	if rest == "" {
@@ -328,12 +329,19 @@ func (m *model) handlePlan(rest string) tea.Cmd {
 	switch rest {
 	case "on":
 		m.engine.EnterPlanMode()
-		m.sbAppendUser("/plan: on (read-only until /plan off)")
+		m.sbAppendUser("/plan: on (read-only until /plan off or /plan approve)")
 	case "off":
 		m.engine.ExitPlanMode()
 		m.sbAppendUser("/plan: off")
+	case "approve":
+		if !m.engine.IsPlanMode() {
+			m.sbAppendUser("/plan approve: not in plan mode")
+			return nil
+		}
+		m.engine.ApprovePlan()
+		m.sbAppendUser("/plan: approved — executing (mode: accept_edits)")
 	default:
-		m.sbAppendUser("/plan: invalid " + rest + " (want on|off)")
+		m.sbAppendUser("/plan: invalid " + rest + " (want on|off|approve)")
 	}
 	return nil
 }

@@ -394,8 +394,35 @@ func (e *Engine) ExitPlanMode() {
 	e.planActive = false
 }
 
+// ApprovePlan exits plan mode and switches to accept_edits so the model can
+// immediately begin executing the approved plan without per-file prompts
+// (M10b). No-op when plan mode is not active.
+func (e *Engine) ApprovePlan() {
+	if !e.planActive || e.permEng == nil || e.permEng.Context == nil {
+		return
+	}
+	e.permEng.Context.Mode = permission.ModeAcceptEdits
+	e.planActive = false
+}
+
 // IsPlanMode reports whether the engine is currently in plan mode (M7g).
 func (e *Engine) IsPlanMode() bool { return e.planActive }
+
+// PermissionMode returns the effective permission mode string (M10c).
+func (e *Engine) PermissionMode() string {
+	if e.permEng == nil || e.permEng.Context == nil {
+		return string(permission.ModeDefault)
+	}
+	return string(e.permEng.Context.Mode)
+}
+
+// SetPermissionMode sets the effective permission mode (M10c).
+func (e *Engine) SetPermissionMode(mode string) {
+	if e.permEng == nil || e.permEng.Context == nil {
+		return
+	}
+	e.permEng.Context.Mode = permission.PermissionMode(mode)
+}
 
 // Subagents returns a snapshot of subagent dispatches recorded by the Task
 // tool during this session (M7e). Used by /agents.

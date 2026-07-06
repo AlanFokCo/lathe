@@ -51,6 +51,7 @@ type fakeControl struct {
 	thinkingCalls []string                      // M7a: audit trail
 	effort        string                        // M7b
 	plan          bool                          // M7g
+	permMode      string                        // M10c
 	subagents     []subagent.SubagentInfo       // M7e
 	jailed        bool                          // M7f
 	sandboxMode   string                        // M7f
@@ -88,12 +89,20 @@ func (f *fakeControl) SetThinking(enable bool, budget int) {
 	}
 	f.thinkingCalls = append(f.thinkingCalls, fmt.Sprintf("%v/%d", enable, budget))
 }
-func (f *fakeControl) Thinking() (bool, int)              { return f.thinkingOn, f.thinkingBud }
-func (f *fakeControl) SetEffort(level string)             { f.effort = level }
-func (f *fakeControl) Effort() string                     { return f.effort }
-func (f *fakeControl) EnterPlanMode()                     { f.plan = true }
-func (f *fakeControl) ExitPlanMode()                      { f.plan = false }
-func (f *fakeControl) IsPlanMode() bool                   { return f.plan }
+func (f *fakeControl) Thinking() (bool, int)  { return f.thinkingOn, f.thinkingBud }
+func (f *fakeControl) SetEffort(level string) { f.effort = level }
+func (f *fakeControl) Effort() string         { return f.effort }
+func (f *fakeControl) EnterPlanMode()         { f.plan = true }
+func (f *fakeControl) ExitPlanMode()          { f.plan = false }
+func (f *fakeControl) ApprovePlan()           { f.plan = false; f.permMode = "accept_edits" }
+func (f *fakeControl) IsPlanMode() bool       { return f.plan }
+func (f *fakeControl) PermissionMode() string {
+	if f.permMode == "" {
+		return "default"
+	}
+	return f.permMode
+}
+func (f *fakeControl) SetPermissionMode(m string)         { f.permMode = m }
 func (f *fakeControl) Subagents() []subagent.SubagentInfo { return f.subagents }
 func (f *fakeControl) Jailed() bool                       { return f.jailed }
 func (f *fakeControl) SandboxMode() string {
@@ -660,5 +669,43 @@ func TestRedrawThrottleBatchesTextDeltas(t *testing.T) {
 	}
 	if m.dirty {
 		t.Fatal("tick should clear dirty")
+	}
+}
+
+// M10b: /plan approve exits plan mode and switches to accept_edits.
+func TestSlashPlanApprove(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+
+	// approve when not in plan mode → error message
+	m.handlePlan("approve")
+	if !strings.Contains(m.sb.build(80, -1), "not in plan mode") {
+		t.Fatal("approve outside plan mode should warn")
+	}
+
+	// enter plan mode, then approve
+	m.handlePlan("on")
+	if !ctrl.plan {
+		t.Fatal("plan should be on")
+	}
+	m.handlePlan("approve")
+	if ctrl.plan {
+		t.Fatal("plan should be off after approve")
+	}
+	if ctrl.permMode != "accept_edits" {
+		t.Fatalf("permission mode after approve should be accept_edits, got %q", ctrl.permMode)
+	}
+	if !strings.Contains(m.sb.build(80, -1), "approved") {
+		t.Fatal("approve should confirm in scrollback")
+	}
+}
+
+// M10b: /plan on message mentions /plan approve.
+func TestSlashPlanOnMentionsApprove(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+	m.handlePlan("on")
+	if !strings.Contains(m.sb.build(80, -1), "approve") {
+		t.Fatal("/plan on message should mention /plan approve")
 	}
 }

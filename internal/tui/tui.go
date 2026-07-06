@@ -46,7 +46,10 @@ type EngineControl interface {
 	Effort() string                           // M7b: report current
 	EnterPlanMode()                           // M7g: /plan on
 	ExitPlanMode()                            // M7g: /plan off
+	ApprovePlan()                             // M10b: /plan approve → exit plan + accept_edits
 	IsPlanMode() bool                         // M7g: status line + slash report
+	PermissionMode() string                   // M10c: status line + Shift+Tab
+	SetPermissionMode(mode string)            // M10c: Shift+Tab cycling
 	Subagents() []subagent.SubagentInfo       // M7e: /agents
 	Jailed() bool                             // M7f: /sandbox
 	SandboxMode() string                      // M7f: /sandbox
