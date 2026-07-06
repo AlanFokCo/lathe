@@ -5,11 +5,13 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/mcpconfig"
 	"github.com/alanfokco/lathe/internal/session"
@@ -76,14 +78,16 @@ type model struct {
 	viewport       viewport.Model
 	selectedTool   int // M5d: index into sb.blocks of the highlighted tool block, -1 none
 	cwd            string
-	dirty          bool      // M6a: TextDelta marked scrollback dirty; drained by formatTick
-	rebuildN       int       // M6a: rebuild() call counter (test observability)
-	turnStart      time.Time // M6c: current turn start, for elapsed + tok/s
-	lastIn         int       // M6c: last ModelCallEnd InputTokens ≈ context used
-	ctxSize        int       // M6c: model context-window size (from StatusInfo)
-	paletteCursor  int       // M6c-3: selected index in the slash command palette
-	cumCacheR      int       // M6c-4: cumulative cache-read tokens
-	cumCacheW      int       // M6c-4: cumulative cache-creation tokens
+	dirty          bool                        // M6a: TextDelta marked scrollback dirty; drained by formatTick
+	rebuildN       int                         // M6a: rebuild() call counter (test observability)
+	turnStart      time.Time                   // M6c: current turn start, for elapsed + tok/s
+	lastIn         int                         // M6c: last ModelCallEnd InputTokens ≈ context used
+	ctxSize        int                         // M6c: model context-window size (from StatusInfo)
+	paletteCursor  int                         // M6c-3: selected index in the slash command palette
+	cumCacheR      int                         // M6c-4: cumulative cache-read tokens
+	cumCacheW      int                         // M6c-4: cumulative cache-creation tokens
+	todos          []tool.Task                 // M6h: live TodoWrite tracker
+	todoBufs       map[string]*strings.Builder // M6h: id → task_* payload accumulator
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
@@ -123,13 +127,50 @@ func (m *model) submit(prompt string) tea.Cmd {
 // rebuild re-renders the scrollback into the viewport (M5d). If the user is
 // currently pinned to the bottom, re-snap; otherwise leave their scroll
 // position alone (claude-code-style "don't yank back while reading history").
+// M6h: also re-applies layout so a growing/shrinking todo pane resizes the
+// viewport instead of pushing the input off-screen.
 func (m *model) rebuild() {
 	m.rebuildN++ // M6a: observability for the redraw-throttle test
+	m.applyLayout()
 	atBottom := m.viewport.AtBottom()
 	m.viewport.SetContent(m.sb.build(m.wrapWidth(), m.selectedTool))
 	if atBottom {
 		m.viewport.GotoBottom()
 	}
+}
+
+// applyLayout resizes the viewport based on current terminal dims minus the
+// three pinned lines (activity + status + input) minus the todo pane height.
+// M6h. No-op before the first WindowSizeMsg (width/height=0).
+func (m *model) applyLayout() {
+	if m.width <= 0 || m.height <= 0 {
+		return
+	}
+	h := m.height - 3 - m.todoPaneHeight()
+	if h < 1 {
+		h = 1
+	}
+	m.viewport.Width = m.width
+	m.viewport.Height = h
+}
+
+// todoPaneHeight returns the number of lines todoPane() will produce (M6h).
+func (m *model) todoPaneHeight() int {
+	if len(m.todos) == 0 {
+		return 0
+	}
+	const cap = 5
+	shown := len(m.todos)
+	overflow := 0
+	if shown > cap {
+		overflow = shown - cap
+		shown = cap
+	}
+	lines := 1 + shown // "todos:" header + shown entries
+	if overflow > 0 {
+		lines++ // "… N more"
+	}
+	return lines
 }
 
 // toolBlockIndices returns sb block indices of finished tool blocks (M5d).
@@ -243,8 +284,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.viewport.Width = msg.Width
-		m.viewport.Height = msg.Height - 3 // 3 pinned lines: activity + status + input (M5d)
+		// M6h: rebuild() invokes applyLayout() which now factors in the todo pane.
 		m.rebuild()
 		return m, nil
 	case tea.KeyMsg:
@@ -424,13 +464,32 @@ func (m *model) handleEvent(ev asevent.Event) {
 		m.sb.appendTool(e.ToolCallID, e.ToolCallName, e.ToolCallInput)
 		m.phase = phaseRunning
 		m.curTool = e.ToolCallName
+		// M6h: remember the tool name by call id so ToolResultEnd can decide
+		// whether to feed the accumulated payload into the todo tracker.
+		if strings.HasPrefix(e.ToolCallName, "task_") {
+			if m.todoBufs == nil {
+				m.todoBufs = map[string]*strings.Builder{}
+			}
+			m.todoBufs[e.ToolCallID] = &strings.Builder{}
+		}
 	case asevent.ToolResultTextDeltaEvent:
 		m.sb.appendToolResultDelta(e.ToolCallID, e.Delta)
+		// M6h: mirror the delta into the todo buffer (if this call was a task_*).
+		if buf, ok := m.todoBufs[e.ToolCallID]; ok {
+			buf.WriteString(e.Delta)
+		}
 	case asevent.ToolResultEndEvent:
 		// M6b: tool-result Metadata (enriched upstream) carries the Edit/Write
 		// diff, rendered by the colored-diff renderer.
 		m.sb.finishTool(e.ToolCallID, string(e.State), diffFromMeta(e.Metadata))
 		m.phase = phaseThinking
+		// M6h: on task_* completion, parse the accumulated JSON payload and
+		// merge into the todo tracker. Ignore parse errors — the tool result
+		// is user-visible in scrollback, so a silent skip is fine.
+		if buf, ok := m.todoBufs[e.ToolCallID]; ok {
+			m.mergeTodoPayload(buf.String())
+			delete(m.todoBufs, e.ToolCallID)
+		}
 	case asevent.RequireUserConfirmEvent:
 		if len(e.ToolCalls) > 0 {
 			m.pendingTool = e.ToolCalls[0].Name
@@ -456,6 +515,45 @@ func (m *model) handleEvent(ev asevent.Event) {
 		m.phase = phaseIdle
 	}
 	m.rebuild() // M5d: refresh viewport content after every event
+}
+
+// mergeTodoPayload parses a task_* tool result JSON payload (a single Task, as
+// task_create/get/update return, OR an array of Tasks, as task_list returns)
+// and merges into m.todos by id, preserving insertion order for new ids. M6h.
+func (m *model) mergeTodoPayload(payload string) {
+	payload = strings.TrimSpace(payload)
+	if payload == "" {
+		return
+	}
+	if strings.HasPrefix(payload, "[") {
+		var arr []tool.Task
+		if err := json.Unmarshal([]byte(payload), &arr); err != nil {
+			return
+		}
+		for _, t := range arr {
+			m.upsertTodo(t)
+		}
+		return
+	}
+	var one tool.Task
+	if err := json.Unmarshal([]byte(payload), &one); err != nil {
+		return
+	}
+	m.upsertTodo(one)
+}
+
+// upsertTodo replaces an existing todo by id in place, else appends. M6h.
+func (m *model) upsertTodo(t tool.Task) {
+	if t.ID == "" {
+		return
+	}
+	for i := range m.todos {
+		if m.todos[i].ID == t.ID {
+			m.todos[i] = t
+			return
+		}
+	}
+	m.todos = append(m.todos, t)
 }
 
 // diffFromMeta extracts a unified diff from a tool-result event's metadata
@@ -644,5 +742,47 @@ func (m *model) View() string {
 			mid = renderPalette(items, m.paletteCursor)
 		}
 	}
+	pane := m.todoPane()
+	if pane != "" {
+		return pane + "\n" + m.viewport.View() + "\n" + mid + "\n" + bottom
+	}
 	return m.viewport.View() + "\n" + mid + "\n" + bottom
+}
+
+// todoPane renders the pinned TodoWrite checklist above the scrollback (M6h).
+// Empty string when the tracker is empty (no extra pinned line). Caps at 5
+// visible entries so it does not eat the viewport; "... N more" indicates
+// overflow. States render as [ ] / [~] / [x].
+func (m *model) todoPane() string {
+	if len(m.todos) == 0 {
+		return ""
+	}
+	const cap = 5
+	var b strings.Builder
+	b.WriteString("todos:")
+	shown := len(m.todos)
+	if shown > cap {
+		shown = cap
+	}
+	for i := 0; i < shown; i++ {
+		b.WriteString("\n  ")
+		b.WriteString(todoMark(m.todos[i].State))
+		b.WriteByte(' ')
+		b.WriteString(m.todos[i].Subject)
+	}
+	if extra := len(m.todos) - shown; extra > 0 {
+		b.WriteString(fmt.Sprintf("\n  … %d more", extra))
+	}
+	return b.String()
+}
+
+func todoMark(state string) string {
+	switch state {
+	case "completed":
+		return "[x]"
+	case "in_progress":
+		return "[~]"
+	default:
+		return "[ ]"
+	}
 }

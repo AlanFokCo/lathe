@@ -6,6 +6,7 @@ import (
 	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/permission"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/tool"
 )
 
 // Run executes the agent for a single user prompt, streaming agentscope block-
@@ -32,6 +33,12 @@ func (e *Engine) runWrap(ctx context.Context, prompt string, ch chan<- asevent.E
 		if r, _ := e.hookRunner.Run(ctx, "UserPromptSubmit", map[string]any{"prompt": prompt}); r.Context != "" {
 			prompt = prompt + "\n\n" + r.Context
 		}
+	}
+	// M6h: propagate the TodoWrite context so task_* tools can find it via
+	// GetTaskContext(ctx). Same *TaskContext across every Run of this Engine
+	// so tasks survive the turn boundary (the model can reference earlier ids).
+	if e.taskCtx != nil {
+		ctx = tool.WithTaskContext(ctx, e.taskCtx)
 	}
 	asCh, err := e.agent.ReplyStream(ctx, prompt)
 	if err != nil {

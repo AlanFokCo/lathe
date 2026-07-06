@@ -292,6 +292,33 @@ func TestEngineToolNamesReportsFullInventory(t *testing.T) {
 	}
 }
 
+// TestNewEngineRegistersTaskToolkit — M6h: TodoWrite tools (task_create/
+// task_get/task_list/task_update) are wired so the model can maintain a live
+// per-session task list. They rely on TaskContext being in ctx, so this only
+// tests registration; end-to-end injection is tested by TUI integration.
+func TestNewEngineRegistersTaskToolkit(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "proj")
+	mustMkdir(t, work)
+	t.Setenv("HOME", home)
+	t.Chdir(work)
+
+	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "bypass", MaxIters: 10}
+	eng, err := NewEngine(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	for _, name := range []string{"task_create", "task_get", "task_list", "task_update"} {
+		if eng.toolkit.Get(name) == nil {
+			t.Fatalf("toolkit missing task tool %q", name)
+		}
+	}
+	if eng.taskCtx == nil {
+		t.Fatal("engine taskCtx not initialized")
+	}
+}
+
 func TestNewEngineRegistersTaskTool(t *testing.T) {
 	home := t.TempDir()
 	work := filepath.Join(home, "proj")

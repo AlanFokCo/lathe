@@ -5,8 +5,11 @@ import (
 	"testing"
 	"time"
 
+	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/alanfokco/lathe/internal/mcpconfig"
 	"github.com/alanfokco/lathe/internal/session"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestCommandRegistryHasCoreCommands(t *testing.T) {
@@ -37,6 +40,53 @@ func TestMatchCommandsPrefix(t *testing.T) {
 	}
 	if names["help"] {
 		t.Fatalf("matchCommands(c) should not include help")
+	}
+}
+
+// TestModelTracksTodoFromTaskCreate — M6h: task_create result carries the new
+// task as JSON; TUI parses it into a live todo tracker so the pinned checklist
+// stays in sync without agentscope needing a dedicated event.
+func TestModelTracksTodoFromTaskCreate(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	m.handleEvent(callStart("t1", "task_create"))
+	payload := `{"id":"1","subject":"write tests","description":"...","state":"pending","created_at":"x"}`
+	m.handleEvent(asevent.NewToolResultTextDeltaEvent("", "t1", payload))
+	m.handleEvent(asevent.NewToolResultEndEvent("", "t1", message.ToolResultSuccess))
+	if len(m.todos) != 1 {
+		t.Fatalf("todos: %+v", m.todos)
+	}
+	if m.todos[0].Subject != "write tests" || m.todos[0].State != "pending" {
+		t.Fatalf("todo[0] = %+v", m.todos[0])
+	}
+	if !strings.Contains(m.View(), "write tests") {
+		t.Fatalf("view missing pinned todo:\n%s", m.View())
+	}
+}
+
+// TestModelMergesTodoOnTaskUpdate — subsequent task_update returns the fully
+// updated task (same id); the tracker replaces in place, preserving order.
+func TestModelMergesTodoOnTaskUpdate(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	m.handleEvent(callStart("t1", "task_create"))
+	m.handleEvent(asevent.NewToolResultTextDeltaEvent("", "t1", `{"id":"1","subject":"a","description":"","state":"pending","created_at":"x"}`))
+	m.handleEvent(asevent.NewToolResultEndEvent("", "t1", message.ToolResultSuccess))
+	m.handleEvent(callStart("t2", "task_update"))
+	m.handleEvent(asevent.NewToolResultTextDeltaEvent("", "t2", `{"id":"1","subject":"a","description":"","state":"completed","created_at":"x"}`))
+	m.handleEvent(asevent.NewToolResultEndEvent("", "t2", message.ToolResultSuccess))
+	if len(m.todos) != 1 || m.todos[0].State != "completed" {
+		t.Fatalf("todos: %+v", m.todos)
+	}
+}
+
+// TestTodoPaneHiddenWhenEmpty — no tasks → view has no checklist marks.
+func TestTodoPaneHiddenWhenEmpty(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	got := m.View()
+	if strings.Contains(got, "[ ]") || strings.Contains(got, "[x]") {
+		t.Fatalf("todo marks should not appear when empty:\n%s", got)
 	}
 }
 

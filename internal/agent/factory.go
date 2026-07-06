@@ -53,6 +53,7 @@ type Engine struct {
 	cwd             string             // M5b: cwd snapshot for statusline payload
 	settings        *settings.Settings // M5b: parsed settings (for StatusLineConfig)
 	readCache       *tool.ReadCache    // M6a: read-before-write guard, injected via WithReadCache
+	taskCtx         *tool.TaskContext  // M6h: TodoWrite state, wired into Run's ctx via tool.WithTaskContext
 	pendingMu       sync.Mutex
 	pending         *pendingApproval // HITL bridge: last RequireUserConfirm
 }
@@ -123,6 +124,17 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	// subagent shares the same workspace (no escape).
 	tk.AddGroup("task", NewTaskTool(cm, permEng, cfg.MaxIters, subToolkit))
 
+	// M6h: TodoWrite toolkit — task_create/get/list/update backed by a per-
+	// engine TaskContext (injected into every Run's ctx). TUI consumes the
+	// task_* tool result payloads to keep the pinned checklist in sync.
+	taskCtx := tool.NewTaskContext()
+	tk.AddGroup("todo",
+		tool.TaskCreateTool(),
+		tool.TaskGetTool(),
+		tool.TaskListTool(),
+		tool.TaskUpdateTool(),
+	)
+
 	skillsSection := ""
 	if len(skillsList) > 0 {
 		skillsSection = skill.FormatSkillInstructions(skillsList)
@@ -171,6 +183,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		compressCfg: defaultCompressConfig(), session: sess,
 		mcpClients: mcpClients, mcpServers: mcpServers, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
 		cwd: cwd, settings: settingsCfg, readCache: readCache,
+		taskCtx: taskCtx,
 	}
 	e.assembleAgent()
 	return e, nil
