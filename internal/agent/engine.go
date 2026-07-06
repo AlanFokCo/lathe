@@ -40,6 +40,13 @@ func (e *Engine) runWrap(ctx context.Context, prompt string, ch chan<- asevent.E
 	if e.taskCtx != nil {
 		ctx = tool.WithTaskContext(ctx, e.taskCtx)
 	}
+	// M7g: plan mode preamble. Prepended so the model knows to produce a plan
+	// instead of trying to modify files (the perm engine also enforces this
+	// via ModeExplore denials, but a proactive preamble avoids wasted tool
+	// calls and gives the model an actionable framing).
+	if e.planActive {
+		prompt = "[PLAN MODE — you are in read-only planning mode. Produce a clear step-by-step plan; do NOT call any tool that writes, edits, or shells out. When ready, ask the user to approve before exiting plan mode.]\n\n" + prompt
+	}
 	asCh, err := e.agent.ReplyStream(ctx, prompt)
 	if err != nil {
 		// ReplyStream only fails on empty input (validated paths ensure non-empty).

@@ -13,6 +13,7 @@ import (
 
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/model"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/permission"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/resilience"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/config"
@@ -290,6 +291,46 @@ func TestEngineToolNamesReportsFullInventory(t *testing.T) {
 			t.Fatalf("ToolNames missing %q; got %v", want, names)
 		}
 	}
+}
+
+// TestEnginePlanModeEntersExplore — M7g: EnterPlanMode swaps the perm mode
+// to ModeExplore (read-only) so the model can plan without editing files.
+// ExitPlanMode restores the prior mode exactly.
+func TestEnginePlanModeEntersExplore(t *testing.T) {
+	eng := newEngineForTest(&fakeModel{}, tool.NewToolkit(), bypassEngine(), 10)
+	before := eng.permEng.Context.Mode
+	if eng.IsPlanMode() {
+		t.Fatal("should start out of plan mode")
+	}
+	eng.EnterPlanMode()
+	if !eng.IsPlanMode() {
+		t.Fatal("EnterPlanMode did not flip flag")
+	}
+	if eng.permEng.Context.Mode != permission.ModeExplore {
+		t.Fatalf("perm mode = %s, want explore", eng.permEng.Context.Mode)
+	}
+	eng.ExitPlanMode()
+	if eng.IsPlanMode() {
+		t.Fatal("ExitPlanMode did not flip flag")
+	}
+	if eng.permEng.Context.Mode != before {
+		t.Fatalf("perm mode = %s, want %s", eng.permEng.Context.Mode, before)
+	}
+}
+
+// TestEnginePlanModeIdempotent — repeated Enter/Exit no-ops safely and does
+// not corrupt the saved mode (so a double `/plan on` doesn't leak Explore
+// into the saved slot).
+func TestEnginePlanModeIdempotent(t *testing.T) {
+	eng := newEngineForTest(&fakeModel{}, tool.NewToolkit(), bypassEngine(), 10)
+	before := eng.permEng.Context.Mode
+	eng.EnterPlanMode()
+	eng.EnterPlanMode() // second call must not overwrite prePlanMode with Explore
+	eng.ExitPlanMode()
+	if eng.permEng.Context.Mode != before {
+		t.Fatalf("perm mode after double-enter/exit = %s, want %s", eng.permEng.Context.Mode, before)
+	}
+	eng.ExitPlanMode() // no-op
 }
 
 // TestNewEngineRegistersLSPTool — M7c: LSPTool is exposed under group "lsp"

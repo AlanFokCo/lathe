@@ -42,6 +42,9 @@ type EngineControl interface {
 	Thinking() (enable bool, budget int) // M7a: report current
 	SetEffort(level string)              // M7b: /effort low|medium|high|off
 	Effort() string                      // M7b: report current
+	EnterPlanMode()                      // M7g: /plan on
+	ExitPlanMode()                       // M7g: /plan off
+	IsPlanMode() bool                    // M7g: status line + slash report
 }
 
 type modelState int
@@ -642,6 +645,9 @@ func (m *model) statusLine() string {
 	parts = append(parts, fmt.Sprintf("in=%d out=%d", m.cumIn, m.cumOut))
 	if cb := contextBar(m.lastIn, m.ctxSize); cb != "" { // M6c: context-window usage
 		parts = append(parts, cb)
+	}
+	if m.engine.IsPlanMode() { // M7g: prominent PLAN marker so read-only mode is impossible to miss
+		parts = append(parts, warnStyle.Render("PLAN"))
 	}
 	return strings.Join(parts, " · ")
 }

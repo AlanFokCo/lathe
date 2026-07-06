@@ -176,6 +176,31 @@ func (m *model) handleThinking(rest string) tea.Cmd {
 	return nil
 }
 
+// handlePlan parses /plan [on|off] and toggles read-only plan mode (M7g).
+// Empty args → report current state.
+func (m *model) handlePlan(rest string) tea.Cmd {
+	rest = strings.TrimSpace(strings.ToLower(rest))
+	if rest == "" {
+		state := "off"
+		if m.engine.IsPlanMode() {
+			state = "on"
+		}
+		m.sbAppendUser("/plan: " + state)
+		return nil
+	}
+	switch rest {
+	case "on":
+		m.engine.EnterPlanMode()
+		m.sbAppendUser("/plan: on (read-only until /plan off)")
+	case "off":
+		m.engine.ExitPlanMode()
+		m.sbAppendUser("/plan: off")
+	default:
+		m.sbAppendUser("/plan: invalid " + rest + " (want on|off)")
+	}
+	return nil
+}
+
 // handleEffort parses /effort [low|medium|high|off] and calls the engine
 // (M7b). Empty args → report current level. "off"/"none" clears the level.
 // Unknown values print an error and leave the level unchanged.

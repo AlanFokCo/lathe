@@ -43,6 +43,31 @@ func TestMatchCommandsPrefix(t *testing.T) {
 	}
 }
 
+// TestSlashPlanOnOff — M7g: /plan on|off enters/exits plan mode; empty arg
+// reports current state.
+func TestSlashPlanOnOff(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+	m.maybeSlash("/plan on")
+	if !ctrl.plan {
+		t.Fatal("plan mode not entered")
+	}
+	m.maybeSlash("/plan off")
+	if ctrl.plan {
+		t.Fatal("plan mode not exited")
+	}
+}
+
+// TestStatusLineShowsPlanMarker — the pinned status line must call out plan
+// mode so the user always knows they'"'"'re in a read-only planning session.
+func TestStatusLineShowsPlanMarker(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o", plan: true}
+	m := newModel(ctrl, testCfg())
+	if !strings.Contains(m.View(), "PLAN") {
+		t.Fatalf("view missing PLAN marker:\n%s", m.View())
+	}
+}
+
 // TestSlashEffort — M7b: /effort <level> sets the reasoning effort; /effort
 // with no arg reports the current level; /effort off clears it.
 func TestSlashEffort(t *testing.T) {

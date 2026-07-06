@@ -48,6 +48,7 @@ type fakeControl struct {
 	thinkingBud   int                    // M7a
 	thinkingCalls []string               // M7a: audit trail
 	effort        string                 // M7b
+	plan          bool                   // M7g
 }
 
 func (f *fakeControl) SetModel(name string) error {
@@ -82,6 +83,9 @@ func (f *fakeControl) SetThinking(enable bool, budget int) {
 func (f *fakeControl) Thinking() (bool, int)  { return f.thinkingOn, f.thinkingBud }
 func (f *fakeControl) SetEffort(level string) { f.effort = level }
 func (f *fakeControl) Effort() string         { return f.effort }
+func (f *fakeControl) EnterPlanMode()         { f.plan = true }
+func (f *fakeControl) ExitPlanMode()          { f.plan = false }
+func (f *fakeControl) IsPlanMode() bool       { return f.plan }
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 

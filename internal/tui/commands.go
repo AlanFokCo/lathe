@@ -43,6 +43,7 @@ func commands() []command {
 		{"tools", "list tools exposed to the model", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.toolsText()); return nil }},
 		{"thinking", "toggle extended thinking (on|off|budget=N)", func(m *model, rest string) tea.Cmd { return m.handleThinking(rest) }},
 		{"effort", "set reasoning effort (low|medium|high|off)", func(m *model, rest string) tea.Cmd { return m.handleEffort(rest) }},
+		{"plan", "enter/exit read-only plan mode (on|off)", func(m *model, rest string) tea.Cmd { return m.handlePlan(rest) }},
 		{"quit", "exit lathe", func(m *model, _ string) tea.Cmd { return tea.Quit }},
 	}
 }

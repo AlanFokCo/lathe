@@ -50,12 +50,14 @@ type Engine struct {
 	mcpServers      []mcpconfig.ServerInfo // M6c-5: name + tool count for /mcp
 	hookRunner      *hooks.Runner
 	workspaceCloser func() error
-	cwd             string             // M5b: cwd snapshot for statusline payload
-	settings        *settings.Settings // M5b: parsed settings (for StatusLineConfig)
-	readCache       *tool.ReadCache    // M6a: read-before-write guard, injected via WithReadCache
-	taskCtx         *tool.TaskContext  // M6h: TodoWrite state, wired into Run's ctx via tool.WithTaskContext
-	thinker         *thinker           // M7a: extended-thinking option wrapper (live-toggleable)
-	efforter        *efforter          // M7b: reasoning-effort option wrapper (live-toggleable)
+	cwd             string                    // M5b: cwd snapshot for statusline payload
+	settings        *settings.Settings        // M5b: parsed settings (for StatusLineConfig)
+	readCache       *tool.ReadCache           // M6a: read-before-write guard, injected via WithReadCache
+	taskCtx         *tool.TaskContext         // M6h: TodoWrite state, wired into Run's ctx via tool.WithTaskContext
+	thinker         *thinker                  // M7a: extended-thinking option wrapper (live-toggleable)
+	efforter        *efforter                 // M7b: reasoning-effort option wrapper (live-toggleable)
+	planActive      bool                      // M7g: /plan on flips this + swaps perm mode
+	prePlanMode     permission.PermissionMode // M7g: perm mode to restore on ExitPlanMode
 	pendingMu       sync.Mutex
 	pending         *pendingApproval // HITL bridge: last RequireUserConfirm
 }
@@ -354,6 +356,32 @@ func (e *Engine) Effort() string {
 	}
 	return e.efforter.Effort()
 }
+
+// EnterPlanMode swaps the permission mode to ModeExplore (read-only) and
+// remembers the previous mode so ExitPlanMode can restore it (M7g). Idempotent
+// — a second EnterPlanMode call is a no-op so it does not overwrite the saved
+// mode with Explore.
+func (e *Engine) EnterPlanMode() {
+	if e.planActive || e.permEng == nil || e.permEng.Context == nil {
+		return
+	}
+	e.prePlanMode = e.permEng.Context.Mode
+	e.permEng.Context.Mode = permission.ModeExplore
+	e.planActive = true
+}
+
+// ExitPlanMode restores the permission mode saved by EnterPlanMode (M7g).
+// Idempotent — called with plan not active it is a no-op.
+func (e *Engine) ExitPlanMode() {
+	if !e.planActive || e.permEng == nil || e.permEng.Context == nil {
+		return
+	}
+	e.permEng.Context.Mode = e.prePlanMode
+	e.planActive = false
+}
+
+// IsPlanMode reports whether the engine is currently in plan mode (M7g).
+func (e *Engine) IsPlanMode() bool { return e.planActive }
 
 // ListModels returns model names available for the current provider.
 func (e *Engine) ListModels() []string {
