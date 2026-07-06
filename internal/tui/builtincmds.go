@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -63,6 +64,49 @@ Guidance for coding agents (lathe / claude-code) working in this repository.
 ## Conventions
 -
 `
+
+// mcpText renders the /mcp output: one line per configured MCP server with its
+// tool count, or a "no MCP servers configured" hint (M6c-5). The snapshot is
+// taken by NewEngine so this is just a read.
+func (m *model) mcpText() string {
+	servers := m.engine.MCPServers()
+	if len(servers) == 0 {
+		return "/mcp: no MCP servers configured"
+	}
+	var b strings.Builder
+	b.WriteString("/mcp:\n")
+	for _, s := range servers {
+		b.WriteString(fmt.Sprintf("  %s (%d tools)\n", s.Name, s.ToolCount))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// resumeText renders the /resume output: one line per session (id / model /
+// mtime / first prompt), plus the `lathe --resume <id>` command hint. In-
+// process reload is deferred (M6c-5); the user restarts the CLI to resume.
+func (m *model) resumeText() string {
+	sessions := m.engine.ListSessions()
+	if len(sessions) == 0 {
+		return "/resume: no sessions found in this directory"
+	}
+	var b strings.Builder
+	b.WriteString("/resume:\n")
+	for _, s := range sessions {
+		short := s.ID
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		prompt := strings.ReplaceAll(s.FirstPrompt, "\n", " ")
+		const maxPrompt = 60
+		if len(prompt) > maxPrompt {
+			prompt = prompt[:maxPrompt] + "…"
+		}
+		mtime := s.ModTime.Format(time.RFC3339)
+		b.WriteString(fmt.Sprintf("  %s  %-18s  %s  %q\n", short, s.Model, mtime, prompt))
+	}
+	b.WriteString("\nrun: lathe --resume <id>")
+	return strings.TrimRight(b.String(), "\n")
+}
 
 // handleInit scaffolds a CLAUDE.md in the working directory if absent (M6c-4).
 func (m *model) handleInit() tea.Cmd {

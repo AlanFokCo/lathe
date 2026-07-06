@@ -14,6 +14,26 @@ type MCPGroup struct {
 	Tools []tool.Tool
 }
 
+// ServerInfo is a lightweight per-server summary for the /mcp UI (M6c-5).
+// Kept in this package so both agent (producer) and tui (consumer) can
+// depend on it without introducing a cycle.
+type ServerInfo struct {
+	Name      string
+	ToolCount int
+}
+
+// SummarizeGroups projects []MCPGroup down to []ServerInfo (name + tool count).
+func SummarizeGroups(groups []MCPGroup) []ServerInfo {
+	if len(groups) == 0 {
+		return nil
+	}
+	out := make([]ServerInfo, 0, len(groups))
+	for _, g := range groups {
+		out = append(out, ServerInfo{Name: g.Name, ToolCount: len(g.Tools)})
+	}
+	return out
+}
+
 // BuildClients builds an mcp.Client per server config, discovers tools, and
 // returns the live clients (for Close on shutdown), the tool groups (for
 // AddGroup), and warnings for servers that failed to start or list tools.

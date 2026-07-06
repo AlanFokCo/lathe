@@ -9,6 +9,8 @@ import (
 	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/alanfokco/lathe/internal/config"
+	"github.com/alanfokco/lathe/internal/mcpconfig"
+	"github.com/alanfokco/lathe/internal/session"
 	"github.com/alanfokco/lathe/internal/settings"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -39,6 +41,8 @@ type fakeControl struct {
 	slConfig      *settings.StatusLineConfig
 	cwd, sid, tp  string
 	ctxSize       int
+	mcpServers    []mcpconfig.ServerInfo // M6c-5
+	sessions      []session.Summary      // M6c-5
 }
 
 func (f *fakeControl) SetModel(name string) error {
@@ -60,6 +64,8 @@ func (f *fakeControl) StatusInfo() (string, string, string, int) {
 	return f.cwd, f.sid, f.tp, f.ctxSize
 }
 func (f *fakeControl) StatusLineConfig() *settings.StatusLineConfig { return f.slConfig }
+func (f *fakeControl) MCPServers() []mcpconfig.ServerInfo           { return f.mcpServers }
+func (f *fakeControl) ListSessions() []session.Summary              { return f.sessions }
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 
@@ -517,7 +523,7 @@ func TestToolBlockCollapsedThenExpanded(t *testing.T) {
 
 	// select + expand
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}}) // select last tool
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})                      // expand (input empty)
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})                     // expand (input empty)
 	view = m.View()
 	if !strings.Contains(view, "secret-output-line1") {
 		t.Fatalf("expanded view missing full output:\n%s", view)
@@ -581,7 +587,7 @@ func TestExpandEGatedOnEmptyInput(t *testing.T) {
 	for _, ev := range result("a", "Read", "out", message.ToolResultSuccess) {
 		m.handleEvent(ev)
 	}
-	m.input.Focus() // M5d: mimic Init() focusing the textarea so typed runes land
+	m.input.Focus()                                              // M5d: mimic Init() focusing the textarea so typed runes land
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}}) // select
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}) // type 'x' into input
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}}) // 'e' → textarea, not expand

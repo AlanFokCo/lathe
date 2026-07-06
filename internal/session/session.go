@@ -3,11 +3,13 @@
 package session
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -92,6 +94,95 @@ func Load(id string) (*Session, []*message.Msg, error) {
 		return nil, nil, fmt.Errorf("session %q not found", id)
 	}
 	return loadFile(path)
+}
+
+// Summary is a lightweight session record for the /resume list (M6c-5).
+type Summary struct {
+	ID          string
+	Model       string
+	FirstPrompt string
+	ModTime     time.Time
+}
+
+// List returns summaries of all sessions in cwd's project dir, newest first
+// (by file mtime). Best-effort: returns nil when the dir is missing; corrupt
+// transcripts are skipped, not fatal. /resume needs a listing that always
+// succeeds so the UI can render a "no sessions" hint instead of an error.
+func List(cwd string) []Summary {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	dir := filepath.Join(home, ".lathe", "projects", encodeCwd(cwd))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []Summary
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		info, ierr := e.Info()
+		if ierr != nil {
+			continue
+		}
+		s := summarizeFile(filepath.Join(dir, e.Name()), info.ModTime())
+		if s.ID == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ModTime.After(out[j].ModTime) })
+	return out
+}
+
+// summarizeFile reads the metadata line and scans for the first user-role
+// message with non-empty text. Returns zero Summary when the metadata line is
+// missing/corrupt (caller filters those out).
+func summarizeFile(path string, mtime time.Time) Summary {
+	f, err := os.Open(path)
+	if err != nil {
+		return Summary{}
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	if !scanner.Scan() {
+		return Summary{}
+	}
+	var meta Session
+	if err := json.Unmarshal(scanner.Bytes(), &meta); err != nil {
+		return Summary{}
+	}
+	s := Summary{ID: meta.ID, Model: meta.Model, ModTime: mtime}
+	for scanner.Scan() {
+		var msg message.Msg
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			continue
+		}
+		if msg.Role != message.RoleUser {
+			continue
+		}
+		if text := firstUserText(&msg); text != "" {
+			s.FirstPrompt = text
+			break
+		}
+	}
+	return s
+}
+
+// firstUserText returns the first non-empty TextBlock on a user message.
+// Empty on tool-result-only user messages (which have no text blocks).
+func firstUserText(msg *message.Msg) string {
+	for _, b := range msg.GetContentBlocks(message.ContentBlockText) {
+		if tb, ok := b.(message.TextBlock); ok {
+			if t := strings.TrimSpace(tb.Text); t != "" {
+				return t
+			}
+		}
+	}
+	return ""
 }
 
 // Latest returns the most recent session in cwd's project dir.

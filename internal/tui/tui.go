@@ -11,6 +11,8 @@ import (
 
 	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
 	"github.com/alanfokco/lathe/internal/config"
+	"github.com/alanfokco/lathe/internal/mcpconfig"
+	"github.com/alanfokco/lathe/internal/session"
 	"github.com/alanfokco/lathe/internal/settings"
 	"github.com/alanfokco/lathe/internal/statusline"
 	"github.com/alanfokco/lathe/internal/tui/theme"
@@ -31,6 +33,8 @@ type EngineControl interface {
 	SubmitApproval(decision string)
 	StatusInfo() (cwd, sessionID, transcriptPath string, contextSize int)
 	StatusLineConfig() *settings.StatusLineConfig
+	MCPServers() []mcpconfig.ServerInfo // M6c-5: /mcp
+	ListSessions() []session.Summary    // M6c-5: /resume
 }
 
 type modelState int

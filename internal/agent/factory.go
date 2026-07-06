@@ -17,7 +17,6 @@ import (
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/resilience"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/skill"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/tool"
-	"github.com/sirupsen/logrus"
 	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/hooks"
 	"github.com/alanfokco/lathe/internal/mcpconfig"
@@ -25,6 +24,7 @@ import (
 	"github.com/alanfokco/lathe/internal/settings"
 	"github.com/alanfokco/lathe/internal/skills"
 	"github.com/alanfokco/lathe/internal/workspace"
+	"github.com/sirupsen/logrus"
 )
 
 // Engine is lathe's turn engine. M6a: it is a thin product shell over the
@@ -46,6 +46,7 @@ type Engine struct {
 	compressCfg     compressConfig
 	session         *session.Session
 	mcpClients      []mcp.Client
+	mcpServers      []mcpconfig.ServerInfo // M6c-5: name + tool count for /mcp
 	hookRunner      *hooks.Runner
 	workspaceCloser func() error
 	cwd             string             // M5b: cwd snapshot for statusline payload
@@ -90,6 +91,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	for _, w := range mcpWarnings {
 		fmt.Fprintln(os.Stderr, "mcp:", w)
 	}
+	mcpServers := mcpconfig.SummarizeGroups(mcpGroups) // M6c-5: snapshot for /mcp
 
 	// M4c: load settings + build hook runner (settings.json hooks).
 	settingsCfg, serr := settings.Load(cwd)
@@ -166,7 +168,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		configuredMode: configuredMode, maxIters: cfg.MaxIters,
 		state: state, sysPrompt: sysPrompt, cfg: cfg,
 		compressCfg: defaultCompressConfig(), session: sess,
-		mcpClients: mcpClients, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
+		mcpClients: mcpClients, mcpServers: mcpServers, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
 		cwd: cwd, settings: settingsCfg, readCache: readCache,
 	}
 	e.assembleAgent()
@@ -311,6 +313,17 @@ func (e *Engine) StatusLineConfig() *settings.StatusLineConfig {
 	}
 	return e.settings.StatusLine
 }
+
+// MCPServers returns a summary of configured MCP servers (name + tool count),
+// snapshotted from mcpconfig.Load at NewEngine (M6c-5). Empty when no MCP
+// servers are configured. Used by /mcp.
+func (e *Engine) MCPServers() []mcpconfig.ServerInfo { return e.mcpServers }
+
+// ListSessions returns summaries of the current cwd's sessions, newest first
+// (M6c-5). Best-effort: empty on missing/unreadable project dir. Used by
+// /resume to render a list + `lathe --resume <id>` hint (in-process reload
+// is deferred).
+func (e *Engine) ListSessions() []session.Summary { return session.List(e.cwd) }
 
 // Close releases engine resources, including MCP client connections. It is
 // idempotent and best-effort (per-client errors are ignored).
