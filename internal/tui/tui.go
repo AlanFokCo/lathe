@@ -494,40 +494,19 @@ func (m *model) activityLine() string {
 	return m.spinner.View() + " " + label
 }
 
-// maybeSlash handles /help /clear /quit /model /config. Returns (cmd, true) if
-// input was a slash command.
+// maybeSlash dispatches a "/cmd rest" input via the command registry (M6c).
+// Returns (cmd, true) if the input was a slash command.
 func (m *model) maybeSlash(input string) (tea.Cmd, bool) {
-	cmd, rest, ok := parseSlash(input)
+	name, rest, ok := parseSlash(input)
 	if !ok {
 		return nil, false
 	}
-	switch cmd {
-	case "quit":
-		return tea.Quit, true
-	case "clear":
-		m.sb.clear()
-		m.rebuild()
-		return nil, true
-	case "help":
-		m.sbAppendUser("/help: commands: /help /clear /quit /compact /model [name] /config")
-		return nil, true
-	case "compact":
-		msg, err := m.engine.CompressNow(context.Background())
-		if err != nil {
-			m.sbAppendUser("/compact: " + err.Error())
-		} else {
-			m.sbAppendUser("/compact: " + msg)
-		}
-		return nil, true
-	case "model":
-		return m.handleModel(rest), true
-	case "config":
-		m.sbAppendUser(configString(m.cfg))
-		return nil, true
-	default:
-		m.sbAppendUser("unknown command: /" + cmd + " " + rest)
+	c, found := lookupCommand(name)
+	if !found {
+		m.sbAppendUser("unknown command: /" + name + " " + rest)
 		return nil, true
 	}
+	return c.run(m, rest), true
 }
 
 func (m *model) handleModel(rest string) tea.Cmd {
@@ -551,6 +530,29 @@ func (m *model) handleModel(rest string) tea.Cmd {
 	}
 	m.sbAppendUser("/model: switched to " + rest)
 	return m.scheduleStatusLine()
+}
+
+// handleTheme shows or switches the TUI theme live (M6c). A switch re-applies
+// the palette and forces assistant blocks to re-render at the new glamour style.
+func (m *model) handleTheme(rest string) tea.Cmd {
+	if rest == "" {
+		var b strings.Builder
+		b.WriteString("/theme: current=" + curTheme.Name + "\n")
+		for _, name := range []string{"lathe-dark", "light"} {
+			mark := "  "
+			if name == curTheme.Name {
+				mark = "* "
+			}
+			b.WriteString(mark + name + "\n")
+		}
+		m.sbAppendUser(strings.TrimRight(b.String(), "\n"))
+		return nil
+	}
+	applyTheme(theme.Get(rest))
+	m.sb.invalidateRenders()
+	m.rebuild()
+	m.sbAppendUser("/theme: switched to " + curTheme.Name)
+	return nil
 }
 
 func configString(cfg *config.Config) string {

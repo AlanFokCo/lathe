@@ -108,6 +108,14 @@ func (s *scrollback) appendError(err error) {
 
 func (s *scrollback) clear() { s.blocks = nil; s.lastAssistant = 0 }
 
+// invalidateRenders forces assistant blocks to re-run glamour on the next build
+// (e.g. after a theme switch changes the glamour style). M6c.
+func (s *scrollback) invalidateRenders() {
+	for i := range s.blocks {
+		s.blocks[i].fmtWidth = -1
+	}
+}
+
 // M6b: styles are driven by the active theme. curTheme + the style vars are
 // package-level and mutated only from the bubbletea Update goroutine (startup
 // via init, and /theme switch), so no synchronization is needed.
