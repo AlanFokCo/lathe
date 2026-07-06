@@ -176,6 +176,32 @@ func (m *model) handleThinking(rest string) tea.Cmd {
 	return nil
 }
 
+// handleEffort parses /effort [low|medium|high|off] and calls the engine
+// (M7b). Empty args → report current level. "off"/"none" clears the level.
+// Unknown values print an error and leave the level unchanged.
+func (m *model) handleEffort(rest string) tea.Cmd {
+	rest = strings.TrimSpace(strings.ToLower(rest))
+	if rest == "" {
+		lvl := m.engine.Effort()
+		if lvl == "" {
+			lvl = "off"
+		}
+		m.sbAppendUser("/effort: " + lvl)
+		return nil
+	}
+	switch rest {
+	case "off", "none":
+		m.engine.SetEffort("")
+		m.sbAppendUser("/effort: off")
+	case "low", "medium", "high":
+		m.engine.SetEffort(rest)
+		m.sbAppendUser("/effort: " + rest)
+	default:
+		m.sbAppendUser("/effort: invalid level " + rest + " (want low|medium|high|off)")
+	}
+	return nil
+}
+
 // handleInit scaffolds a CLAUDE.md in the working directory if absent (M6c-4).
 func (m *model) handleInit() tea.Cmd {
 	path := "CLAUDE.md"

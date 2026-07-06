@@ -44,6 +44,7 @@ type Config struct {
 	Theme                   string  // M6b: TUI theme name (lathe-dark | light)
 	Thinking                bool    // M7a: enable Anthropic extended thinking
 	ThinkingBudget          int     // M7a: thinking token budget (0 = provider default)
+	ReasoningEffort         string  // M7b: OpenAI reasoning effort ("low"|"medium"|"high"); "" = provider default
 }
 
 // Flags holds CLI overrides; empty fields are unset.
@@ -52,8 +53,9 @@ type Flags struct {
 	MaxIters                                                                     int
 	Resume                                                                       string
 	Continue                                                                     bool
-	Thinking                                                                     bool // M7a
-	ThinkingBudget                                                               int  // M7a
+	Thinking                                                                     bool   // M7a
+	ThinkingBudget                                                               int    // M7a
+	Effort                                                                       string // M7b: reasoning effort
 }
 
 // Load resolves a Config from flags + env + defaults.
@@ -103,6 +105,11 @@ func Load(f Flags) (*Config, error) {
 		if cfg.ThinkingBudget == 0 {
 			cfg.ThinkingBudget = 4096
 		}
+	}
+	// M7b: reasoning effort. Flag > env; empty leaves provider defaults.
+	cfg.ReasoningEffort = f.Effort
+	if cfg.ReasoningEffort == "" {
+		cfg.ReasoningEffort = os.Getenv("LATHE_EFFORT")
 	}
 
 	if f.Provider != "" {

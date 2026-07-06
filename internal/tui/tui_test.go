@@ -47,6 +47,7 @@ type fakeControl struct {
 	thinkingOn    bool                   // M7a
 	thinkingBud   int                    // M7a
 	thinkingCalls []string               // M7a: audit trail
+	effort        string                 // M7b
 }
 
 func (f *fakeControl) SetModel(name string) error {
@@ -78,7 +79,9 @@ func (f *fakeControl) SetThinking(enable bool, budget int) {
 	}
 	f.thinkingCalls = append(f.thinkingCalls, fmt.Sprintf("%v/%d", enable, budget))
 }
-func (f *fakeControl) Thinking() (bool, int) { return f.thinkingOn, f.thinkingBud }
+func (f *fakeControl) Thinking() (bool, int)  { return f.thinkingOn, f.thinkingBud }
+func (f *fakeControl) SetEffort(level string) { f.effort = level }
+func (f *fakeControl) Effort() string         { return f.effort }
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 

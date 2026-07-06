@@ -55,6 +55,7 @@ type Engine struct {
 	readCache       *tool.ReadCache    // M6a: read-before-write guard, injected via WithReadCache
 	taskCtx         *tool.TaskContext  // M6h: TodoWrite state, wired into Run's ctx via tool.WithTaskContext
 	thinker         *thinker           // M7a: extended-thinking option wrapper (live-toggleable)
+	efforter        *efforter          // M7b: reasoning-effort option wrapper (live-toggleable)
 	pendingMu       sync.Mutex
 	pending         *pendingApproval // HITL bridge: last RequireUserConfirm
 }
@@ -73,6 +74,10 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	// can be toggled live via Engine.SetThinking (used by the /thinking slash).
 	thk := newThinker(cm, cfg.Thinking, cfg.ThinkingBudget)
 	cm = thk
+	// M7b: reasoning effort — layered outside thinker so a Chat gets both
+	// options in one pass; likewise live-toggleable via /effort.
+	ef := newEfforter(cm, cfg.ReasoningEffort)
+	cm = ef
 	tk := tool.NewEnhancedToolkit()
 	configuredMode := permission.PermissionMode(cfg.Permission)
 	permCtx := permission.NewContext(printEffectiveMode(configuredMode))
@@ -188,7 +193,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		compressCfg: defaultCompressConfig(), session: sess,
 		mcpClients: mcpClients, mcpServers: mcpServers, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
 		cwd: cwd, settings: settingsCfg, readCache: readCache,
-		taskCtx: taskCtx, thinker: thk,
+		taskCtx: taskCtx, thinker: thk, efforter: ef,
 	}
 	e.assembleAgent()
 	return e, nil
@@ -300,7 +305,12 @@ func (e *Engine) SetModel(name string) error {
 		en, bud = e.thinker.Thinking()
 	}
 	e.thinker = newThinker(cm, en, bud)
-	e.chatModel = e.thinker
+	lvl := e.cfg.ReasoningEffort
+	if e.efforter != nil {
+		lvl = e.efforter.Effort()
+	}
+	e.efforter = newEfforter(e.thinker, lvl)
+	e.chatModel = e.efforter
 	e.assembleAgent() // rebuild ucm + agent; persistHook.saved = len(state.Context)
 	return nil
 }
@@ -321,6 +331,23 @@ func (e *Engine) Thinking() (bool, int) {
 		return false, 0
 	}
 	return e.thinker.Thinking()
+}
+
+// SetEffort updates the reasoning-effort level ("" disables) (M7b). Used by
+// /effort.
+func (e *Engine) SetEffort(level string) {
+	if e.efforter == nil {
+		return
+	}
+	e.efforter.SetEffort(level)
+}
+
+// Effort returns the current reasoning-effort level ("" when off).
+func (e *Engine) Effort() string {
+	if e.efforter == nil {
+		return ""
+	}
+	return e.efforter.Effort()
 }
 
 // ListModels returns model names available for the current provider.

@@ -43,6 +43,37 @@ func TestMatchCommandsPrefix(t *testing.T) {
 	}
 }
 
+// TestSlashEffort — M7b: /effort <level> sets the reasoning effort; /effort
+// with no arg reports the current level; /effort off clears it.
+func TestSlashEffort(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+	m.maybeSlash("/effort high")
+	if ctrl.Effort() != "high" {
+		t.Fatalf("effort not set: %q", ctrl.Effort())
+	}
+	m.maybeSlash("/effort")
+	if !strings.Contains(m.View(), "high") {
+		t.Fatalf("/effort status missing:\n%s", m.View())
+	}
+	m.maybeSlash("/effort off")
+	if ctrl.Effort() != "" {
+		t.Fatalf("effort not cleared: %q", ctrl.Effort())
+	}
+}
+
+func TestSlashEffortRejectsBadLevel(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+	m.maybeSlash("/effort ludicrous")
+	if ctrl.Effort() == "ludicrous" {
+		t.Fatal("unknown effort should be rejected, not set verbatim")
+	}
+	if !strings.Contains(m.View(), "invalid") {
+		t.Fatalf("/effort error missing:\n%s", m.View())
+	}
+}
+
 // TestSlashThinkingOnOff — M7a: /thinking on|off flips the engine flag; /thinking
 // with no arg reports current state.
 func TestSlashThinkingOnOff(t *testing.T) {

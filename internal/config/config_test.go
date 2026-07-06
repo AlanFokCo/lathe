@@ -166,6 +166,43 @@ func TestLoadThinkingDisabledByDefault(t *testing.T) {
 	}
 }
 
+// TestLoadEffortFlag — M7b: --effort resolves into cfg.ReasoningEffort. Empty
+// means "provider default"; only the OpenAI provider currently honors it.
+func TestLoadEffortFlag(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	cfg, err := Load(Flags{Prompt: "hi", Effort: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReasoningEffort != "high" {
+		t.Fatalf("effort = %q, want high", cfg.ReasoningEffort)
+	}
+}
+
+func TestLoadEffortEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	t.Setenv("LATHE_EFFORT", "medium")
+	cfg, err := Load(Flags{Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReasoningEffort != "medium" {
+		t.Fatalf("effort = %q, want medium", cfg.ReasoningEffort)
+	}
+}
+
+func TestLoadEffortDefaultEmpty(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	t.Setenv("LATHE_EFFORT", "")
+	cfg, err := Load(Flags{Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReasoningEffort != "" {
+		t.Fatalf("effort default = %q, want empty", cfg.ReasoningEffort)
+	}
+}
+
 func TestLoadOllamaMissingModel(t *testing.T) {
 	cfg, err := Load(Flags{Provider: "ollama"})
 	if err != nil {

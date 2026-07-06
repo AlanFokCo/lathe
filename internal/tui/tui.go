@@ -40,6 +40,8 @@ type EngineControl interface {
 	ToolNames() []string                 // M6f: /tools
 	SetThinking(enable bool, budget int) // M7a: /thinking on|off|budget=N
 	Thinking() (enable bool, budget int) // M7a: report current
+	SetEffort(level string)              // M7b: /effort low|medium|high|off
+	Effort() string                      // M7b: report current
 }
 
 type modelState int

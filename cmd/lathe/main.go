@@ -20,6 +20,7 @@ func newRootCmd() *cobra.Command {
 	var sandbox string
 	var thinking bool
 	var thinkingBudget int
+	var effort string
 
 	root := &cobra.Command{
 		Use:     "lathe",
@@ -40,13 +41,14 @@ func newRootCmd() *cobra.Command {
 	root.Flags().StringVar(&themeName, "theme", "", "TUI theme: lathe-dark|light")
 	root.Flags().BoolVar(&thinking, "thinking", false, "enable Anthropic extended thinking (M7a)")
 	root.Flags().IntVar(&thinkingBudget, "thinking-budget", 0, "extended-thinking token budget (default 4096 when --thinking)")
+	root.Flags().StringVar(&effort, "effort", "", "OpenAI reasoning effort: low|medium|high (M7b)")
 
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load(config.Flags{
 			Provider: provider, Model: model, APIKey: apiKey, BaseURL: baseURL,
 			Permission: permissionMode, Output: output, MaxIters: maxIters, Prompt: prompt,
 			Resume: resumeID, Continue: doContinue, Sandbox: sandbox, Theme: themeName,
-			Thinking: thinking, ThinkingBudget: thinkingBudget,
+			Thinking: thinking, ThinkingBudget: thinkingBudget, Effort: effort,
 		})
 		if err != nil {
 			return err
