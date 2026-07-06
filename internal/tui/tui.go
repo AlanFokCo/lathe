@@ -86,6 +86,7 @@ type model struct {
 	cumIn          int
 	cumOut         int
 	pendingTool    string
+	pendingInput   string // M10d: raw JSON args of the pending tool call
 	statusLineText string
 	slGen          int
 	spinner        spinner.Model
@@ -604,6 +605,7 @@ func (m *model) handleEvent(ev asevent.Event) {
 	case asevent.RequireUserConfirmEvent:
 		if len(e.ToolCalls) > 0 {
 			m.pendingTool = e.ToolCalls[0].Name
+			m.pendingInput = e.ToolCalls[0].Input
 		}
 		m.state = stateAwaitingApproval
 	case asevent.CustomEvent:
@@ -847,8 +849,7 @@ func redactKey(k string) string {
 func (m *model) View() string {
 	bottom := m.statusLine() + "\n" + promptStyle.Render("> ") + m.input.View()
 	if m.state == stateAwaitingApproval {
-		return m.viewport.View() + "\n" +
-			fmt.Sprintf("Approve %s? [y]es / [n]o / [a]lways (ESC=deny)", m.pendingTool) + "\n" + bottom
+		return m.viewport.View() + "\n" + m.approvalBar() + "\n" + bottom
 	}
 	// M5d: activity line is always present (empty when idle) so the pinned area
 	// is a stable 3 lines. M6c-3: when a slash palette is active (idle), it takes
@@ -909,6 +910,34 @@ func todoMark(state string) string {
 	default:
 		return "[ ]"
 	}
+}
+
+// approvalBar renders the tool-approval prompt line with formatted args (M10d).
+func (m *model) approvalBar() string {
+	var b strings.Builder
+	b.WriteString(warnStyle.Render("─── Approve "))
+	b.WriteString(selectedToolStyle.Render(m.pendingTool))
+	b.WriteString(warnStyle.Render("? "))
+	b.WriteString("[y]es / [n]o / [a]lways  (ESC=deny)")
+	if m.pendingInput != "" {
+		preview := formatToolInput(m.pendingInput, m.width-4)
+		b.WriteString("\n")
+		b.WriteString(dimStyle.Render(preview))
+	}
+	return b.String()
+}
+
+// formatToolInput returns a compact preview of JSON tool-call args, truncated
+// to fit within maxWidth (M10d).
+func formatToolInput(raw string, maxWidth int) string {
+	if maxWidth < 20 {
+		maxWidth = 80
+	}
+	s := strings.TrimSpace(raw)
+	if len(s) > maxWidth*3 {
+		s = s[:maxWidth*3] + "…"
+	}
+	return s
 }
 
 // permModeLabel returns a styled mode abbreviation for the status line (M10c).

@@ -754,3 +754,35 @@ func TestPermModeLabel(t *testing.T) {
 		}
 	}
 }
+
+// M10d: approval bar shows tool name and args preview.
+func TestApprovalBar(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+	m.pendingTool = "Bash"
+	m.pendingInput = `{"command":"ls -la"}`
+	m.width = 80
+	bar := m.approvalBar()
+	if !strings.Contains(bar, "Bash") {
+		t.Fatal("approval bar should contain tool name")
+	}
+	if !strings.Contains(bar, "ls -la") {
+		t.Fatal("approval bar should preview args")
+	}
+	if !strings.Contains(bar, "[y]es") {
+		t.Fatal("approval bar should show key hints")
+	}
+}
+
+// M10d: formatToolInput truncates long input.
+func TestFormatToolInputTruncation(t *testing.T) {
+	long := strings.Repeat("x", 500)
+	got := formatToolInput(long, 80)
+	runes := []rune(got)
+	if len(runes) > 80*3+1 {
+		t.Fatalf("should truncate long input, got %d runes", len(runes))
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Fatal("truncated input should end with …")
+	}
+}
