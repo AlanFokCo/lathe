@@ -54,6 +54,7 @@ type Engine struct {
 	settings        *settings.Settings // M5b: parsed settings (for StatusLineConfig)
 	readCache       *tool.ReadCache    // M6a: read-before-write guard, injected via WithReadCache
 	taskCtx         *tool.TaskContext  // M6h: TodoWrite state, wired into Run's ctx via tool.WithTaskContext
+	thinker         *thinker           // M7a: extended-thinking option wrapper (live-toggleable)
 	pendingMu       sync.Mutex
 	pending         *pendingApproval // HITL bridge: last RequireUserConfirm
 }
@@ -68,6 +69,10 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
+	// M7a: wrap the model in a thinker so per-call ThinkingEnable/Budget opts
+	// can be toggled live via Engine.SetThinking (used by the /thinking slash).
+	thk := newThinker(cm, cfg.Thinking, cfg.ThinkingBudget)
+	cm = thk
 	tk := tool.NewEnhancedToolkit()
 	configuredMode := permission.PermissionMode(cfg.Permission)
 	permCtx := permission.NewContext(printEffectiveMode(configuredMode))
@@ -183,7 +188,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		compressCfg: defaultCompressConfig(), session: sess,
 		mcpClients: mcpClients, mcpServers: mcpServers, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
 		cwd: cwd, settings: settingsCfg, readCache: readCache,
-		taskCtx: taskCtx,
+		taskCtx: taskCtx, thinker: thk,
 	}
 	e.assembleAgent()
 	return e, nil
@@ -282,16 +287,40 @@ func newSubagentEngine(name, sysPrompt string, cm model.ChatModel, tk *tool.Tool
 // SetModel switches the chat model (same provider, new model name). The agent
 // is rebuilt (same state.Context/toolkit) so the new model takes effect on the
 // next Run. Unknown model names are accepted (the API layer reports the error
-// on next call).
+// on next call). M7a: the thinker's enable/budget carry across the switch so a
+// live `/thinking on` isn't lost when the user runs `/model foo`.
 func (e *Engine) SetModel(name string) error {
 	e.cfg.Model = name
 	cm, err := buildChatModel(e.cfg)
 	if err != nil {
 		return err
 	}
-	e.chatModel = cm
+	en, bud := false, e.cfg.ThinkingBudget
+	if e.thinker != nil {
+		en, bud = e.thinker.Thinking()
+	}
+	e.thinker = newThinker(cm, en, bud)
+	e.chatModel = e.thinker
 	e.assembleAgent() // rebuild ucm + agent; persistHook.saved = len(state.Context)
 	return nil
+}
+
+// SetThinking toggles extended thinking + budget (M7a). Used by /thinking.
+// A budget of 0 preserves the current budget so `/thinking on` after a prior
+// `/thinking budget=8000` re-enables at 8000 rather than resetting.
+func (e *Engine) SetThinking(enable bool, budget int) {
+	if e.thinker == nil {
+		return
+	}
+	e.thinker.SetThinking(enable, budget)
+}
+
+// Thinking returns the current enable flag + budget for the /thinking slash.
+func (e *Engine) Thinking() (bool, int) {
+	if e.thinker == nil {
+		return false, 0
+	}
+	return e.thinker.Thinking()
 }
 
 // ListModels returns model names available for the current provider.

@@ -43,6 +43,57 @@ func TestMatchCommandsPrefix(t *testing.T) {
 	}
 }
 
+// TestSlashThinkingOnOff — M7a: /thinking on|off flips the engine flag; /thinking
+// with no arg reports current state.
+func TestSlashThinkingOnOff(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+	m.maybeSlash("/thinking on")
+	en, _ := ctrl.Thinking()
+	if !en {
+		t.Fatalf("thinking not enabled: %+v", ctrl.thinkingCalls)
+	}
+	m.maybeSlash("/thinking off")
+	en, _ = ctrl.Thinking()
+	if en {
+		t.Fatal("thinking not disabled")
+	}
+	m.maybeSlash("/thinking")
+	if !strings.Contains(m.View(), "off") {
+		t.Fatalf("/thinking status missing:\n%s", m.View())
+	}
+}
+
+// TestSlashThinkingBudget — /thinking budget=N (with or without prior "on")
+// sets the budget; explicit `/thinking on budget=N` enables at that budget.
+func TestSlashThinkingBudget(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+	m.maybeSlash("/thinking on budget=8000")
+	en, bud := ctrl.Thinking()
+	if !en || bud != 8000 {
+		t.Fatalf("on budget=8000: en=%v bud=%d", en, bud)
+	}
+}
+
+// TestModelRendersThinkingBlockStyled — M7a: ThinkingBlockDelta events land in
+// the scrollback as a thinking block, prefixed and dim-styled so users can see
+// the model'"'"'s reasoning without confusing it with the final answer.
+func TestModelRendersThinkingBlockStyled(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	m.handleEvent(asevent.NewThinkingBlockStartEvent("", "th1"))
+	m.handleEvent(asevent.NewThinkingBlockDeltaEvent("", "th1", "hmm let me consider"))
+	m.handleEvent(asevent.NewThinkingBlockEndEvent("", "th1"))
+	got := m.View()
+	if !strings.Contains(got, "hmm let me consider") {
+		t.Fatalf("view missing thinking body:\n%s", got)
+	}
+	if !strings.Contains(got, "thinking") {
+		t.Fatalf("view missing thinking marker:\n%s", got)
+	}
+}
+
 // TestModelTracksTodoFromTaskCreate — M6h: task_create result carries the new
 // task as JSON; TUI parses it into a live todo tracker so the pinned checklist
 // stays in sync without agentscope needing a dedicated event.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -122,6 +123,57 @@ func (m *model) resumeText() string {
 	}
 	b.WriteString("\nrun: lathe --resume <id>")
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// handleThinking parses `/thinking [on|off] [budget=N]` and calls into the
+// engine (M7a). Empty args → report current state. Tokens are case-insensitive
+// and order-independent; `/thinking on budget=8000` and `/thinking budget=8000
+// on` are equivalent.
+func (m *model) handleThinking(rest string) tea.Cmd {
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		en, bud := m.engine.Thinking()
+		state := "off"
+		if en {
+			state = "on"
+		}
+		msg := fmt.Sprintf("/thinking: %s", state)
+		if bud > 0 {
+			msg += fmt.Sprintf(" (budget=%d)", bud)
+		}
+		m.sbAppendUser(msg)
+		return nil
+	}
+	en, bud := m.engine.Thinking()
+	toggled := false
+	for _, tok := range strings.Fields(rest) {
+		switch {
+		case strings.EqualFold(tok, "on"):
+			en = true
+			toggled = true
+		case strings.EqualFold(tok, "off"):
+			en = false
+			toggled = true
+		case strings.HasPrefix(strings.ToLower(tok), "budget="):
+			if n, err := strconv.Atoi(tok[len("budget="):]); err == nil && n > 0 {
+				bud = n
+			}
+		}
+	}
+	if !toggled && bud > 0 {
+		en = true // /thinking budget=N implicitly enables
+	}
+	m.engine.SetThinking(en, bud)
+	state := "off"
+	if en {
+		state = "on"
+	}
+	msg := fmt.Sprintf("/thinking: %s", state)
+	if bud > 0 {
+		msg += fmt.Sprintf(" (budget=%d)", bud)
+	}
+	m.sbAppendUser(msg)
+	return nil
 }
 
 // handleInit scaffolds a CLAUDE.md in the working directory if absent (M6c-4).

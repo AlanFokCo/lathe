@@ -14,6 +14,7 @@ const (
 	kindAssistant
 	kindTool
 	kindError
+	kindThinking // M7a: extended-thinking output (dim italic, no glamour)
 )
 
 // block is one scrollback entry. M5d upgrades the assistant streaming fields
@@ -60,6 +61,25 @@ func (s *scrollback) appendAssistantText(delta string) {
 	}
 	s.blocks = append(s.blocks, block{kind: kindAssistant, text: delta})
 	s.lastAssistant = len(s.blocks) - 1
+}
+
+// appendThinkingDelta appends a streaming thinking delta into the current
+// thinking block (M7a). A new thinking block is started when the previous one
+// is done (or none exists yet).
+func (s *scrollback) appendThinkingDelta(delta string) {
+	if n := len(s.blocks); n > 0 && s.blocks[n-1].kind == kindThinking && !s.blocks[n-1].done {
+		s.blocks[n-1].text += delta
+		return
+	}
+	s.blocks = append(s.blocks, block{kind: kindThinking, text: delta})
+	s.lastAssistant = -1
+}
+
+// finishThinking marks the last unfinished thinking block as done (M7a).
+func (s *scrollback) finishThinking() {
+	if n := len(s.blocks); n > 0 && s.blocks[n-1].kind == kindThinking {
+		s.blocks[n-1].done = true
+	}
 }
 
 // finishAssistant marks the last assistant block done (on ReplyEnd). M5d.
@@ -129,6 +149,7 @@ var (
 	warnStyle         lipgloss.Style
 	promptStyle       lipgloss.Style
 	selectedToolStyle lipgloss.Style
+	thinkingStyle     lipgloss.Style // M7a
 )
 
 func init() { applyTheme(curTheme) }
@@ -143,6 +164,7 @@ func applyTheme(th theme.Theme) {
 	warnStyle = lipgloss.NewStyle().Foreground(th.Warn)
 	promptStyle = lipgloss.NewStyle().Foreground(th.User)
 	selectedToolStyle = lipgloss.NewStyle().Bold(true).Foreground(th.Accent)
+	thinkingStyle = lipgloss.NewStyle().Faint(true).Italic(true).Foreground(th.Tool) // M7a
 }
 
 // build produces the full scrollback content string at width (M5d). Replaces
@@ -165,6 +187,8 @@ func (s *scrollback) build(width, selectedTool int) string {
 			body = s.buildTool(bl, width, selectedTool == i) // M5d: highlight selected tool block
 		case kindError:
 			body = errorStyle.Render("\nerror: " + bl.text + "\n")
+		case kindThinking:
+			body = renderThinking(bl.text, width)
 		}
 		b.WriteString(body)
 		line += strings.Count(body, "\n")
@@ -238,6 +262,19 @@ func (s *scrollback) buildTool(bl *block, width int, selected bool) string {
 		b.WriteString(indentBlock(wrapRaw(out, width-2), "  ") + "\n")
 	}
 	return b.String()
+}
+
+// renderThinking styles an extended-thinking block: dim italic body under a
+// "▸ thinking" header, wrapped to width. M7a. Kept plain-text (no glamour) so
+// live streaming doesn't churn the markdown renderer, and so a slow thinker
+// remains visually distinct from the final answer.
+func renderThinking(text string, width int) string {
+	header := thinkingStyle.Render("▸ thinking")
+	if strings.TrimSpace(text) == "" {
+		return "\n" + header + "\n"
+	}
+	body := thinkingStyle.Render(indentBlock(wrapRaw(text, width-2), "  "))
+	return "\n" + header + "\n" + body + "\n"
 }
 
 // indentBlock prefixes every non-empty line of s with prefix. M5d.

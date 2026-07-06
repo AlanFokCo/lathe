@@ -110,6 +110,62 @@ func TestLoadOllamaOverrides(t *testing.T) {
 	}
 }
 
+// TestLoadThinkingFlag — M7a: --thinking / --thinking-budget resolve into
+// cfg.Thinking / cfg.ThinkingBudget. Budget defaults to 4096 when thinking is
+// enabled but no explicit budget is passed (matches Anthropic'"'"'s starter).
+func TestLoadThinkingFlag(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	cfg, err := Load(Flags{Prompt: "hi", Thinking: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Thinking {
+		t.Fatal("cfg.Thinking should be true")
+	}
+	if cfg.ThinkingBudget != 4096 {
+		t.Fatalf("default ThinkingBudget = %d, want 4096", cfg.ThinkingBudget)
+	}
+	cfg2, err := Load(Flags{Prompt: "hi", Thinking: true, ThinkingBudget: 8000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg2.ThinkingBudget != 8000 {
+		t.Fatalf("explicit budget = %d, want 8000", cfg2.ThinkingBudget)
+	}
+}
+
+// TestLoadThinkingEnv — LATHE_THINKING=1 / LATHE_THINKING_BUDGET=N without
+// flags.
+func TestLoadThinkingEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	t.Setenv("LATHE_THINKING", "1")
+	t.Setenv("LATHE_THINKING_BUDGET", "12000")
+	cfg, err := Load(Flags{Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Thinking || cfg.ThinkingBudget != 12000 {
+		t.Fatalf("env: thinking=%v budget=%d", cfg.Thinking, cfg.ThinkingBudget)
+	}
+}
+
+// TestLoadThinkingDisabledByDefault — with no flag or env, thinking is off.
+func TestLoadThinkingDisabledByDefault(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	t.Setenv("LATHE_THINKING", "")
+	t.Setenv("LATHE_THINKING_BUDGET", "")
+	cfg, err := Load(Flags{Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Thinking {
+		t.Fatalf("Thinking should default to false")
+	}
+	if cfg.ThinkingBudget != 0 {
+		t.Fatalf("ThinkingBudget should default to 0 when off: %d", cfg.ThinkingBudget)
+	}
+}
+
 func TestLoadOllamaMissingModel(t *testing.T) {
 	cfg, err := Load(Flags{Provider: "ollama"})
 	if err != nil {

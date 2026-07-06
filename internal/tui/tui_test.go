@@ -44,6 +44,9 @@ type fakeControl struct {
 	mcpServers    []mcpconfig.ServerInfo // M6c-5
 	sessions      []session.Summary      // M6c-5
 	toolNames     []string               // M6f
+	thinkingOn    bool                   // M7a
+	thinkingBud   int                    // M7a
+	thinkingCalls []string               // M7a: audit trail
 }
 
 func (f *fakeControl) SetModel(name string) error {
@@ -68,6 +71,14 @@ func (f *fakeControl) StatusLineConfig() *settings.StatusLineConfig { return f.s
 func (f *fakeControl) MCPServers() []mcpconfig.ServerInfo           { return f.mcpServers }
 func (f *fakeControl) ListSessions() []session.Summary              { return f.sessions }
 func (f *fakeControl) ToolNames() []string                          { return f.toolNames }
+func (f *fakeControl) SetThinking(enable bool, budget int) {
+	f.thinkingOn = enable
+	if budget > 0 {
+		f.thinkingBud = budget
+	}
+	f.thinkingCalls = append(f.thinkingCalls, fmt.Sprintf("%v/%d", enable, budget))
+}
+func (f *fakeControl) Thinking() (bool, int) { return f.thinkingOn, f.thinkingBud }
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 

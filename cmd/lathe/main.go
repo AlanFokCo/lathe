@@ -18,6 +18,8 @@ func newRootCmd() *cobra.Command {
 	var resumeID string
 	var doContinue bool
 	var sandbox string
+	var thinking bool
+	var thinkingBudget int
 
 	root := &cobra.Command{
 		Use:     "lathe",
@@ -36,12 +38,15 @@ func newRootCmd() *cobra.Command {
 	root.Flags().BoolVar(&doContinue, "continue", false, "continue most recent session in cwd")
 	root.Flags().StringVar(&sandbox, "sandbox", "", "none|docker|e2b (default none = local execution)")
 	root.Flags().StringVar(&themeName, "theme", "", "TUI theme: lathe-dark|light")
+	root.Flags().BoolVar(&thinking, "thinking", false, "enable Anthropic extended thinking (M7a)")
+	root.Flags().IntVar(&thinkingBudget, "thinking-budget", 0, "extended-thinking token budget (default 4096 when --thinking)")
 
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load(config.Flags{
 			Provider: provider, Model: model, APIKey: apiKey, BaseURL: baseURL,
 			Permission: permissionMode, Output: output, MaxIters: maxIters, Prompt: prompt,
 			Resume: resumeID, Continue: doContinue, Sandbox: sandbox, Theme: themeName,
+			Thinking: thinking, ThinkingBudget: thinkingBudget,
 		})
 		if err != nil {
 			return err

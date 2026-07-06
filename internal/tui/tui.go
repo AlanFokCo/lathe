@@ -35,9 +35,11 @@ type EngineControl interface {
 	SubmitApproval(decision string)
 	StatusInfo() (cwd, sessionID, transcriptPath string, contextSize int)
 	StatusLineConfig() *settings.StatusLineConfig
-	MCPServers() []mcpconfig.ServerInfo // M6c-5: /mcp
-	ListSessions() []session.Summary    // M6c-5: /resume
-	ToolNames() []string                // M6f: /tools
+	MCPServers() []mcpconfig.ServerInfo  // M6c-5: /mcp
+	ListSessions() []session.Summary     // M6c-5: /resume
+	ToolNames() []string                 // M6f: /tools
+	SetThinking(enable bool, budget int) // M7a: /thinking on|off|budget=N
+	Thinking() (enable bool, budget int) // M7a: report current
 }
 
 type modelState int
@@ -452,6 +454,16 @@ func (m *model) handleEvent(ev asevent.Event) {
 		return
 	case asevent.ModelCallStartEvent:
 		m.phase = phaseThinking
+	case asevent.ThinkingBlockStartEvent:
+		// M7a: extended thinking. Start a new thinking block so subsequent
+		// deltas append to it, and reflect the phase for the activity line.
+		m.sb.appendThinkingDelta("")
+		m.phase = phaseThinking
+	case asevent.ThinkingBlockDeltaEvent:
+		m.sb.appendThinkingDelta(e.Delta)
+		m.dirty = true // batch with the formatTick like text deltas
+	case asevent.ThinkingBlockEndEvent:
+		m.sb.finishThinking()
 	case asevent.ModelCallEndEvent:
 		m.cumIn += e.InputTokens
 		m.cumOut += e.OutputTokens

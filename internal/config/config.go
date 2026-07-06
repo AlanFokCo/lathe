@@ -6,6 +6,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/credential"
 )
@@ -40,6 +42,8 @@ type Config struct {
 	RateLimitPerSec         float64 // model calls/sec (0 = unlimited)
 	RateBurst               int     // burst allowance for the rate limiter
 	Theme                   string  // M6b: TUI theme name (lathe-dark | light)
+	Thinking                bool    // M7a: enable Anthropic extended thinking
+	ThinkingBudget          int     // M7a: thinking token budget (0 = provider default)
 }
 
 // Flags holds CLI overrides; empty fields are unset.
@@ -48,6 +52,8 @@ type Flags struct {
 	MaxIters                                                                     int
 	Resume                                                                       string
 	Continue                                                                     bool
+	Thinking                                                                     bool // M7a
+	ThinkingBudget                                                               int  // M7a
 }
 
 // Load resolves a Config from flags + env + defaults.
@@ -76,6 +82,27 @@ func Load(f Flags) (*Config, error) {
 	}
 	if f.MaxIters > 0 {
 		cfg.MaxIters = f.MaxIters
+	}
+	// M7a: extended thinking — flag > env > off. Budget defaults to 4096
+	// tokens when thinking is enabled but no explicit budget is given
+	// (Anthropic's minimum useful budget; leaves plenty of room in an 8k
+	// max-output-tokens envelope).
+	cfg.Thinking = f.Thinking
+	cfg.ThinkingBudget = f.ThinkingBudget
+	if !cfg.Thinking {
+		if envTruthy(os.Getenv("LATHE_THINKING")) {
+			cfg.Thinking = true
+		}
+	}
+	if cfg.Thinking && cfg.ThinkingBudget == 0 {
+		if e := os.Getenv("LATHE_THINKING_BUDGET"); e != "" {
+			if n, err := strconv.Atoi(e); err == nil && n > 0 {
+				cfg.ThinkingBudget = n
+			}
+		}
+		if cfg.ThinkingBudget == 0 {
+			cfg.ThinkingBudget = 4096
+		}
 	}
 
 	if f.Provider != "" {
@@ -126,6 +153,16 @@ func pickDefaultModel(provider, override string) string {
 		return "qwen-plus"
 	}
 	return override
+}
+
+// envTruthy is the same tri-value convention used by Docker/git tooling:
+// "1"/"true"/"yes"/"on" enable, everything else (including empty) is off.
+func envTruthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 func envKeyFor(provider string) string {

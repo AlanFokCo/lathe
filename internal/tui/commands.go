@@ -41,6 +41,7 @@ func commands() []command {
 		{"mcp", "list configured MCP servers", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.mcpText()); return nil }},
 		{"resume", "list historical sessions in the cwd", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.resumeText()); return nil }},
 		{"tools", "list tools exposed to the model", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.toolsText()); return nil }},
+		{"thinking", "toggle extended thinking (on|off|budget=N)", func(m *model, rest string) tea.Cmd { return m.handleThinking(rest) }},
 		{"quit", "exit lathe", func(m *model, _ string) tea.Cmd { return tea.Quit }},
 	}
 }
