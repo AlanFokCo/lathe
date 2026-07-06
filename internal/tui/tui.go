@@ -99,6 +99,8 @@ type model struct {
 	cumCacheW      int                         // M6c-4: cumulative cache-creation tokens
 	todos          []tool.Task                 // M6h: live TodoWrite tracker
 	todoBufs       map[string]*strings.Builder // M6h: id → task_* payload accumulator
+	hist           *history                    // M8b: ↑/↓ input history recall
+	lastCtrlC      time.Time                   // M8b: Ctrl+C double-confirm timestamp
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
@@ -110,7 +112,9 @@ func newModel(engine EngineControl, cfg *config.Config) *model {
 	sp := spinner.New()
 	vp := viewport.New(80, 24)
 	cwd, _, _, ctxSize := engine.StatusInfo()
-	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle, spinner: sp, viewport: vp, selectedTool: -1, cwd: cwd, ctxSize: ctxSize}
+	m := &model{engine: engine, cfg: cfg, input: ta, state: stateIdle, spinner: sp, viewport: vp, selectedTool: -1, cwd: cwd, ctxSize: ctxSize}
+	m.hist = newHistory(defaultHistoryPath()) // M8b: persistent input history
+	return m
 }
 
 // wrapWidth returns the terminal width for wrapping/glamour, defaulting to 80
@@ -360,6 +364,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		// M8b: input history recall when input is empty OR already browsing.
+		// The Browsing() guard lets successive ↑/↓ keep walking through
+		// history after Prev populated the input (which would otherwise fail
+		// the empty check on the next keystroke).
+		if m.state == stateIdle && m.hist != nil && (m.input.Value() == "" || m.hist.Browsing()) {
+			switch msg.Type {
+			case tea.KeyUp:
+				if v, ok := m.hist.Prev(); ok || v != "" {
+					m.input.SetValue(v)
+					return m, nil
+				}
+			case tea.KeyDown:
+				if v, ok := m.hist.Next(); ok {
+					m.input.SetValue(v)
+					return m, nil
+				}
+			}
+		}
 		// M5d: viewport scroll + tool block selection/expand. These run for any
 		// non-approval state. Expand/selection keys only act when input is empty
 		// so typing into the textarea is unaffected (except 'e', which is gated
@@ -395,7 +417,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch {
 		case msg.Type == tea.KeyCtrlC:
-			return m, tea.Quit
+			// M8b: Ctrl+C is contextual. While a turn is running it cancels
+			// the turn (same as Esc). While idle it needs a second press
+			// within 2s to actually quit, so users cannot lose a session by
+			// muscle-memory (bash-style).
+			if m.state == stateRunning {
+				if m.cancel != nil {
+					m.cancel()
+				}
+				return m, nil
+			}
+			if !m.lastCtrlC.IsZero() && time.Since(m.lastCtrlC) < 2*time.Second {
+				return m, tea.Quit
+			}
+			m.lastCtrlC = time.Now()
+			return m, nil
 		case msg.Type == tea.KeyEscape && m.state == stateRunning:
 			if m.cancel != nil {
 				m.cancel()
@@ -405,6 +441,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			text := m.input.Value()
 			if text == "" {
 				return m, nil
+			}
+			if m.hist != nil {
+				m.hist.Append(text) // M8b: persist to history before dispatch
 			}
 			if cmd, ok := m.maybeSlash(text); ok {
 				m.input.Reset()
@@ -416,6 +455,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var c tea.Cmd
 		m.input, c = m.input.Update(msg)
 		m.paletteCursor = 0 // M6c-3: typing re-filters, reset palette selection
+		if m.hist != nil {
+			m.hist.ResetBrowse() // M8b: any typing/edit forgets the recall position
+		}
 		return m, c
 	case eventMsg:
 		m.handleEvent(msg.ev)
@@ -768,6 +810,8 @@ func (m *model) View() string {
 	if m.state == stateIdle {
 		if items := paletteItems(m.input.Value()); len(items) > 0 {
 			mid = renderPalette(items, m.paletteCursor)
+		} else if !m.lastCtrlC.IsZero() && time.Since(m.lastCtrlC) < 2*time.Second {
+			mid = warnStyle.Render("Ctrl+C again to quit") // M8b
 		}
 	}
 	pane := m.todoPane()

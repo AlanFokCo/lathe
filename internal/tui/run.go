@@ -17,7 +17,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	defer eng.Close()
 	eng.SetInteractive(true)
 	m := newModel(eng, cfg)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	// M8b: enable mouse-cell motion so viewport wheel-scroll and click work.
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = p.Run()
 	return err
 }

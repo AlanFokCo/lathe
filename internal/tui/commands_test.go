@@ -44,6 +44,86 @@ func TestMatchCommandsPrefix(t *testing.T) {
 	}
 }
 
+// TestArrowUpEmptyRecallsHistory — M8b: pressing ↑ with an empty input
+// pulls the most recent history entry into the textarea. Subsequent ↑ walks
+// back through older entries; ↓ walks forward and clears at the newest edge.
+func TestArrowUpEmptyRecallsHistory(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.hist = newHistory(t.TempDir() + "/history")
+	m.hist.Append("first")
+	m.hist.Append("second")
+	m.input.Focus()
+
+	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if m.input.Value() != "second" {
+		t.Fatalf("↑ recall = %q, want second", m.input.Value())
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if m.input.Value() != "first" {
+		t.Fatalf("↑↑ recall = %q, want first", m.input.Value())
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if m.input.Value() != "second" {
+		t.Fatalf("↓ forward = %q, want second", m.input.Value())
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if m.input.Value() != "" {
+		t.Fatalf("↓ past newest should clear, got %q", m.input.Value())
+	}
+}
+
+// TestArrowUpWithContentIsPassthrough — with content already typed, ↑ must
+// reach the textarea (multi-line cursor navigation) not history.
+func TestArrowUpWithContentIsPassthrough(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.hist = newHistory(t.TempDir() + "/history")
+	m.hist.Append("older")
+	m.input.Focus()
+	m.input.SetValue("in progress")
+	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if m.input.Value() != "in progress" {
+		t.Fatalf("↑ with content should not recall, got %q", m.input.Value())
+	}
+}
+
+// TestCtrlCFirstThenSecondQuits — M8b: while idle, first Ctrl+C shows a
+// confirm hint and stays; a second Ctrl+C within 2s returns tea.Quit.
+func TestCtrlCFirstThenSecondQuits(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	_, cmd1 := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd1 != nil {
+		if msg := cmd1(); msg != nil {
+			if _, ok := msg.(tea.QuitMsg); ok {
+				t.Fatal("first Ctrl+C should not quit")
+			}
+		}
+	}
+	if !strings.Contains(m.View(), "again to quit") {
+		t.Fatalf("view missing confirm hint:\n%s", m.View())
+	}
+	_, cmd2 := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd2 == nil {
+		t.Fatal("second Ctrl+C should return a cmd")
+	}
+	if _, ok := cmd2().(tea.QuitMsg); !ok {
+		t.Fatalf("second Ctrl+C should quit, got %T", cmd2())
+	}
+}
+
+// TestCtrlCWhileRunningCancels — while a turn is running, Ctrl+C cancels
+// the turn (same as Esc) rather than triggering the confirm-to-quit path.
+func TestCtrlCWhileRunningCancels(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.submit("hi")
+	if m.state != stateRunning {
+		t.Fatalf("state: %v", m.state)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if m.ctx == nil || m.ctx.Err() == nil {
+		t.Fatal("Ctrl+C while running should cancel the turn's ctx")
+	}
+}
+
 // TestSlashSandboxReports — M7f: /sandbox summarizes cwd, sandbox mode, and
 // workspace-root jail so users can audit their safety posture at a glance.
 func TestSlashSandboxReports(t *testing.T) {
