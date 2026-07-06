@@ -342,6 +342,38 @@ func TestModelRendersThinkingBlockStyled(t *testing.T) {
 	}
 }
 
+// TestFilePickerPanelAppears — M9c: typing "@rea" in a cwd containing
+// README.md renders the picker panel with the file listed.
+func TestFilePickerPanelAppears(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir+"/README.md", "hi")
+	ctrl := &fakeControl{model: "gpt-4o", cwd: dir}
+	m := newModel(ctrl, testCfg())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	m.input.Focus()
+	m.input.SetValue("@rea")
+	got := m.View()
+	if !strings.Contains(got, "README.md") {
+		t.Fatalf("view missing README.md in picker:\n%s", got)
+	}
+}
+
+// TestFilePickerTabInserts — Tab replaces "@query" with "@<selected>" (with
+// trailing space so the user can keep typing).
+func TestFilePickerTabInserts(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir+"/notes.md", "hi")
+	ctrl := &fakeControl{model: "gpt-4o", cwd: dir}
+	m := newModel(ctrl, testCfg())
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	m.input.Focus()
+	m.input.SetValue("summarize @not")
+	m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if m.input.Value() != "summarize @notes.md " {
+		t.Fatalf("Tab result = %q, want 'summarize @notes.md '", m.input.Value())
+	}
+}
+
 // TestModelTracksTodoFromTaskCreate — M6h: task_create result carries the new
 // task as JSON; TUI parses it into a live todo tracker so the pinned checklist
 // stays in sync without agentscope needing a dedicated event.

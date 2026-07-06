@@ -15,6 +15,28 @@ func paletteItems(input string) []command {
 	return matchCommands(strings.TrimPrefix(input, "/"))
 }
 
+// renderFilePickerPanel renders the @file autocomplete panel (M9c). Single-
+// line so the pinned bottom area stays a stable height; the selected file is
+// highlighted and a Tab hint follows.
+func renderFilePickerPanel(items []string, cursor int) string {
+	if len(items) == 0 {
+		return ""
+	}
+	if cursor < 0 || cursor >= len(items) {
+		cursor = 0
+	}
+	names := make([]string, len(items))
+	for i, p := range items {
+		if i == cursor {
+			names[i] = selectedToolStyle.Render("@" + p)
+		} else {
+			names[i] = toolStyle.Render("@" + p)
+		}
+	}
+	muted := lipgloss.NewStyle().Foreground(curTheme.Muted)
+	return strings.Join(names, " ") + "  " + muted.Render("↑↓ Tab (files)")
+}
+
 // renderPalette renders a single-line command palette: matching command names
 // (the selected one highlighted) + the selected command's description and a nav
 // hint. Single-line so the pinned bottom area stays a stable height. M6c-3.

@@ -105,6 +105,8 @@ type model struct {
 	todoBufs       map[string]*strings.Builder // M6h: id → task_* payload accumulator
 	hist           *history                    // M8b: ↑/↓ input history recall
 	lastCtrlC      time.Time                   // M8b: Ctrl+C double-confirm timestamp
+	filepick       *filePicker                 // M9c: @file autocomplete backend
+	pickerCursor   int                         // M9c: selected file-picker match index
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
@@ -118,6 +120,7 @@ func newModel(engine EngineControl, cfg *config.Config) *model {
 	cwd, _, _, ctxSize := engine.StatusInfo()
 	m := &model{engine: engine, cfg: cfg, input: ta, state: stateIdle, spinner: sp, viewport: vp, selectedTool: -1, cwd: cwd, ctxSize: ctxSize}
 	m.hist = newHistory(defaultHistoryPath()) // M8b: persistent input history
+	m.filepick = newFilePicker(cwd)           // M9c: @file autocomplete
 	return m
 }
 
@@ -332,6 +335,34 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, nil
+		}
+		// M9c: @file picker — when idle and the input has a trailing @query
+		// (no whitespace after @), arrows navigate file matches, Tab/Enter
+		// inserts the selected file path, Esc dismisses. Takes priority over
+		// the slash palette (which only triggers on input starting with "/").
+		if m.state == stateIdle && m.filepick != nil {
+			if q, prefix, ok := extractAtQuery(m.input.Value()); ok {
+				if items := m.filepick.Match(q); len(items) > 0 {
+					switch msg.Type {
+					case tea.KeyUp:
+						m.pickerCursor = (m.pickerCursor - 1 + len(items)) % len(items)
+						return m, nil
+					case tea.KeyDown:
+						m.pickerCursor = (m.pickerCursor + 1) % len(items)
+						return m, nil
+					case tea.KeyTab, tea.KeyEnter:
+						if m.pickerCursor >= len(items) {
+							m.pickerCursor = 0
+						}
+						m.input.SetValue(prefix + items[m.pickerCursor] + " ")
+						m.pickerCursor = 0
+						return m, nil
+					case tea.KeyEscape:
+						m.pickerCursor = 0
+						return m, nil
+					}
+				}
+			}
 		}
 		// M6c-3: slash command palette — when idle and the input is a bare
 		// "/prefix" (no space), arrows navigate matches, Tab completes, Enter runs
@@ -816,7 +847,12 @@ func (m *model) View() string {
 	// that middle line instead (single-line to keep the height stable).
 	mid := m.activityLine()
 	if m.state == stateIdle {
-		if items := paletteItems(m.input.Value()); len(items) > 0 {
+		// M9c: @file picker takes priority over palette + Ctrl+C hint.
+		if q, _, ok := extractAtQuery(m.input.Value()); ok && m.filepick != nil {
+			if items := m.filepick.Match(q); len(items) > 0 {
+				mid = renderFilePickerPanel(items, m.pickerCursor)
+			}
+		} else if items := paletteItems(m.input.Value()); len(items) > 0 {
 			mid = renderPalette(items, m.paletteCursor)
 		} else if !m.lastCtrlC.IsZero() && time.Since(m.lastCtrlC) < 2*time.Second {
 			mid = warnStyle.Render("Ctrl+C again to quit") // M8b
