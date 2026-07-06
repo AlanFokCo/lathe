@@ -76,6 +76,7 @@ type model struct {
 	turnStart      time.Time // M6c: current turn start, for elapsed + tok/s
 	lastIn         int       // M6c: last ModelCallEnd InputTokens ≈ context used
 	ctxSize        int       // M6c: model context-window size (from StatusInfo)
+	paletteCursor  int       // M6c-3: selected index in the slash command palette
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
@@ -262,6 +263,41 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// M6c-3: slash command palette — when idle and the input is a bare
+		// "/prefix" (no space), arrows navigate matches, Tab completes, Enter runs
+		// the selected command, Esc dismisses. Other keys fall through to typing.
+		if m.state == stateIdle {
+			if items := paletteItems(m.input.Value()); len(items) > 0 {
+				switch msg.Type {
+				case tea.KeyUp:
+					m.paletteCursor = (m.paletteCursor - 1 + len(items)) % len(items)
+					return m, nil
+				case tea.KeyDown:
+					m.paletteCursor = (m.paletteCursor + 1) % len(items)
+					return m, nil
+				case tea.KeyTab:
+					if m.paletteCursor >= len(items) {
+						m.paletteCursor = 0
+					}
+					m.input.SetValue("/" + items[m.paletteCursor].name + " ")
+					m.paletteCursor = 0
+					return m, nil
+				case tea.KeyEscape:
+					m.input.Reset()
+					m.paletteCursor = 0
+					return m, nil
+				case tea.KeyEnter:
+					if m.paletteCursor >= len(items) {
+						m.paletteCursor = 0
+					}
+					name := items[m.paletteCursor].name
+					m.input.Reset()
+					m.paletteCursor = 0
+					cmd, _ := m.maybeSlash("/" + name)
+					return m, cmd
+				}
+			}
+		}
 		// M5d: viewport scroll + tool block selection/expand. These run for any
 		// non-approval state. Expand/selection keys only act when input is empty
 		// so typing into the textarea is unaffected (except 'e', which is gated
@@ -317,6 +353,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var c tea.Cmd
 		m.input, c = m.input.Update(msg)
+		m.paletteCursor = 0 // M6c-3: typing re-filters, reset palette selection
 		return m, c
 	case eventMsg:
 		m.handleEvent(msg.ev)
@@ -589,7 +626,14 @@ func (m *model) View() string {
 		return m.viewport.View() + "\n" +
 			fmt.Sprintf("Approve %s? [y]es / [n]o / [a]lways (ESC=deny)", m.pendingTool) + "\n" + bottom
 	}
-	// M5d: activity line is always present (empty when idle) so the pinned
-	// area is a stable 3 lines — no 1-line jitter between running/idle.
-	return m.viewport.View() + "\n" + m.activityLine() + "\n" + bottom
+	// M5d: activity line is always present (empty when idle) so the pinned area
+	// is a stable 3 lines. M6c-3: when a slash palette is active (idle), it takes
+	// that middle line instead (single-line to keep the height stable).
+	mid := m.activityLine()
+	if m.state == stateIdle {
+		if items := paletteItems(m.input.Value()); len(items) > 0 {
+			mid = renderPalette(items, m.paletteCursor)
+		}
+	}
+	return m.viewport.View() + "\n" + mid + "\n" + bottom
 }
