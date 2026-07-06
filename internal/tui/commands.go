@@ -14,16 +14,17 @@ import (
 // (M6c). It is a function (not a package var) to avoid an init cycle with
 // helpText, which iterates the registry.
 type command struct {
-	name string
-	desc string
-	run  func(m *model, rest string) tea.Cmd
+	name   string
+	desc   string
+	run    func(m *model, rest string) tea.Cmd
+	argsFn func(m *model) []string // M10g: optional argument completer
 }
 
 func commands() []command {
 	return []command{
-		{"help", "list commands", func(m *model, _ string) tea.Cmd { m.sbAppendUser(helpText()); return nil }},
-		{"clear", "clear the scrollback", func(m *model, _ string) tea.Cmd { m.sb.clear(); m.rebuild(); return nil }},
-		{"compact", "summarize + compress the conversation", func(m *model, _ string) tea.Cmd {
+		{name: "help", desc: "list commands", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(helpText()); return nil }},
+		{name: "clear", desc: "clear the scrollback", run: func(m *model, _ string) tea.Cmd { m.sb.clear(); m.rebuild(); return nil }},
+		{name: "compact", desc: "summarize + compress the conversation", run: func(m *model, _ string) tea.Cmd {
 			msg, err := m.engine.CompressNow(context.Background())
 			if err != nil {
 				m.sbAppendUser("/compact: " + err.Error())
@@ -32,23 +33,28 @@ func commands() []command {
 			}
 			return nil
 		}},
-		{"model", "show or switch the model", func(m *model, rest string) tea.Cmd { return m.handleModel(rest) }},
-		{"theme", "show or switch the theme (lathe-dark|light)", func(m *model, rest string) tea.Cmd { return m.handleTheme(rest) }},
-		{"config", "show the resolved config", func(m *model, _ string) tea.Cmd { m.sbAppendUser(configString(m.cfg)); return nil }},
-		{"cost", "show token usage (input/output/cache)", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.costText()); return nil }},
-		{"doctor", "diagnose provider/model/config", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.doctorText()); return nil }},
-		{"init", "scaffold a CLAUDE.md in the cwd", func(m *model, _ string) tea.Cmd { return m.handleInit() }},
-		{"mcp", "list configured MCP servers", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.mcpText()); return nil }},
-		{"resume", "list historical sessions in the cwd", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.resumeText()); return nil }},
-		{"tools", "list tools exposed to the model", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.toolsText()); return nil }},
-		{"thinking", "toggle extended thinking (on|off|budget=N)", func(m *model, rest string) tea.Cmd { return m.handleThinking(rest) }},
-		{"effort", "set reasoning effort (low|medium|high|off)", func(m *model, rest string) tea.Cmd { return m.handleEffort(rest) }},
-		{"plan", "plan mode (on|off|approve)", func(m *model, rest string) tea.Cmd { return m.handlePlan(rest) }},
-		{"agents", "list subagent dispatches (Task tool)", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.agentsText()); return nil }},
-		{"sandbox", "report sandbox mode + workspace-root jail status", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.sandboxText()); return nil }},
-		{"skills", "list discovered skills", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.skillsText()); return nil }},
-		{"hooks", "list configured settings.json hooks", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.hooksText()); return nil }},
-		{"quit", "exit lathe", func(m *model, _ string) tea.Cmd { return tea.Quit }},
+		{name: "model", desc: "show or switch the model", run: func(m *model, rest string) tea.Cmd { return m.handleModel(rest) },
+			argsFn: func(m *model) []string { return m.engine.ListModels() }},
+		{name: "theme", desc: "show or switch the theme (lathe-dark|light)", run: func(m *model, rest string) tea.Cmd { return m.handleTheme(rest) },
+			argsFn: func(_ *model) []string { return []string{"lathe-dark", "light"} }},
+		{name: "config", desc: "show the resolved config", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(configString(m.cfg)); return nil }},
+		{name: "cost", desc: "show token usage (input/output/cache)", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.costText()); return nil }},
+		{name: "doctor", desc: "diagnose provider/model/config", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.doctorText()); return nil }},
+		{name: "init", desc: "scaffold a CLAUDE.md in the cwd", run: func(m *model, _ string) tea.Cmd { return m.handleInit() }},
+		{name: "mcp", desc: "list configured MCP servers", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.mcpText()); return nil }},
+		{name: "resume", desc: "list historical sessions in the cwd", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.resumeText()); return nil }},
+		{name: "tools", desc: "list tools exposed to the model", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.toolsText()); return nil }},
+		{name: "thinking", desc: "toggle extended thinking (on|off|budget=N)", run: func(m *model, rest string) tea.Cmd { return m.handleThinking(rest) },
+			argsFn: func(_ *model) []string { return []string{"on", "off"} }},
+		{name: "effort", desc: "set reasoning effort (low|medium|high|off)", run: func(m *model, rest string) tea.Cmd { return m.handleEffort(rest) },
+			argsFn: func(_ *model) []string { return []string{"low", "medium", "high", "off"} }},
+		{name: "plan", desc: "plan mode (on|off|approve)", run: func(m *model, rest string) tea.Cmd { return m.handlePlan(rest) },
+			argsFn: func(_ *model) []string { return []string{"on", "off", "approve"} }},
+		{name: "agents", desc: "list subagent dispatches (Task tool)", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.agentsText()); return nil }},
+		{name: "sandbox", desc: "report sandbox mode + workspace-root jail status", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.sandboxText()); return nil }},
+		{name: "skills", desc: "list discovered skills", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.skillsText()); return nil }},
+		{name: "hooks", desc: "list configured settings.json hooks", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.hooksText()); return nil }},
+		{name: "quit", desc: "exit lathe", run: func(m *model, _ string) tea.Cmd { return tea.Quit }},
 	}
 }
 

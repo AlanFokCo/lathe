@@ -15,6 +15,54 @@ func paletteItems(input string) []command {
 	return matchCommands(strings.TrimPrefix(input, "/"))
 }
 
+// argPaletteItems returns argument candidates when the input is "/cmd <prefix>"
+// (M10g). Returns the command and filtered args, or nil args when there is no
+// matching command with argsFn.
+func argPaletteItems(input string, m *model) ([]string, string) {
+	if !strings.HasPrefix(input, "/") || !strings.Contains(input, " ") {
+		return nil, ""
+	}
+	sp := strings.IndexByte(input, ' ')
+	cmdName := input[1:sp]
+	prefix := strings.TrimSpace(input[sp+1:])
+	cmd, ok := lookupCommand(cmdName)
+	if !ok || cmd.argsFn == nil {
+		return nil, ""
+	}
+	all := cmd.argsFn(m)
+	if prefix == "" {
+		return all, cmdName
+	}
+	lower := strings.ToLower(prefix)
+	var out []string
+	for _, a := range all {
+		if strings.HasPrefix(strings.ToLower(a), lower) {
+			out = append(out, a)
+		}
+	}
+	return out, cmdName
+}
+
+// renderArgPalette renders a single-line argument completion palette (M10g).
+func renderArgPalette(args []string, cursor int, cmdName string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	if cursor < 0 || cursor >= len(args) {
+		cursor = 0
+	}
+	names := make([]string, len(args))
+	for i, a := range args {
+		if i == cursor {
+			names[i] = selectedToolStyle.Render(a)
+		} else {
+			names[i] = toolStyle.Render(a)
+		}
+	}
+	muted := lipgloss.NewStyle().Foreground(curTheme.Muted)
+	return strings.Join(names, " ") + "  " + muted.Render("/"+cmdName+" · ↑↓ Tab")
+}
+
 // renderFilePickerPanel renders the @file autocomplete panel (M9c). Single-
 // line so the pinned bottom area stays a stable height; the selected file is
 // highlighted and a Tab hint follows.

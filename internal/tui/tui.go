@@ -411,6 +411,37 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, cmd
 				}
 			}
+			// M10g: arg completion palette — when the input is "/cmd prefix",
+			// offer argument candidates from the command's argsFn.
+			if args, _ := argPaletteItems(m.input.Value(), m); len(args) > 0 {
+				switch msg.Type {
+				case tea.KeyUp:
+					m.paletteCursor = (m.paletteCursor - 1 + len(args)) % len(args)
+					return m, nil
+				case tea.KeyDown:
+					m.paletteCursor = (m.paletteCursor + 1) % len(args)
+					return m, nil
+				case tea.KeyTab, tea.KeyEnter:
+					if m.paletteCursor >= len(args) {
+						m.paletteCursor = 0
+					}
+					sp := strings.IndexByte(m.input.Value(), ' ')
+					cmdPart := m.input.Value()[:sp+1]
+					m.input.SetValue(cmdPart + args[m.paletteCursor])
+					m.paletteCursor = 0
+					if msg.Type == tea.KeyEnter {
+						text := m.input.Value()
+						m.input.Reset()
+						cmd, _ := m.maybeSlash(text)
+						return m, cmd
+					}
+					return m, nil
+				case tea.KeyEscape:
+					m.input.Reset()
+					m.paletteCursor = 0
+					return m, nil
+				}
+			}
 		}
 		// M8b: input history recall when input is empty OR already browsing.
 		// The Browsing() guard lets successive ↑/↓ keep walking through
@@ -895,6 +926,8 @@ func (m *model) View() string {
 			}
 		} else if items := paletteItems(m.input.Value()); len(items) > 0 {
 			mid = renderPalette(items, m.paletteCursor)
+		} else if args, cmdName := argPaletteItems(m.input.Value(), m); len(args) > 0 {
+			mid = renderArgPalette(args, m.paletteCursor, cmdName)
 		} else if !m.lastCtrlC.IsZero() && time.Since(m.lastCtrlC) < 2*time.Second {
 			mid = warnStyle.Render("Ctrl+C again to quit") // M8b
 		}

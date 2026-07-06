@@ -882,3 +882,50 @@ func TestCtrlYCopy(t *testing.T) {
 		t.Fatal("Ctrl+Y should confirm copy in scrollback")
 	}
 }
+
+// M10g: argPaletteItems returns candidates for /model, /theme, /effort, /plan.
+func TestArgPaletteItems(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o", models: []string{"gpt-4o", "gpt-4o-mini"}}
+	m := newModel(ctrl, testCfg())
+
+	// /model space → show all models
+	args, cmd := argPaletteItems("/model ", m)
+	if cmd != "model" || len(args) != 2 {
+		t.Fatalf("want 2 model args, got %d (cmd=%q)", len(args), cmd)
+	}
+
+	// /model gpt-4o-m → filter
+	args, _ = argPaletteItems("/model gpt-4o-m", m)
+	if len(args) != 1 || args[0] != "gpt-4o-mini" {
+		t.Fatalf("filtered args: %v", args)
+	}
+
+	// /effort → show effort levels
+	args, cmd = argPaletteItems("/effort ", m)
+	if cmd != "effort" || len(args) < 3 {
+		t.Fatalf("effort should have candidates: %v", args)
+	}
+
+	// /plan → show on/off/approve
+	args, cmd = argPaletteItems("/plan ", m)
+	if cmd != "plan" || len(args) != 3 {
+		t.Fatalf("plan should have 3 args: %v", args)
+	}
+
+	// /clear → no argsFn
+	args, _ = argPaletteItems("/clear ", m)
+	if len(args) != 0 {
+		t.Fatalf("clear should have no args: %v", args)
+	}
+}
+
+// M10g: renderArgPalette renders a line with candidates.
+func TestRenderArgPalette(t *testing.T) {
+	got := renderArgPalette([]string{"low", "medium", "high"}, 1, "effort")
+	if !strings.Contains(got, "medium") {
+		t.Fatal("should contain 'medium'")
+	}
+	if !strings.Contains(got, "/effort") {
+		t.Fatal("should mention the command name")
+	}
+}
