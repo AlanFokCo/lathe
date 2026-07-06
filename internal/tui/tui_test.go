@@ -709,3 +709,48 @@ func TestSlashPlanOnMentionsApprove(t *testing.T) {
 		t.Fatal("/plan on message should mention /plan approve")
 	}
 }
+
+// M10c: Shift+Tab cycles permission mode: default → accept_edits → plan → default.
+func TestShiftTabCyclesMode(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o", permMode: "default"}
+	m := newModel(ctrl, testCfg())
+
+	m.cyclePermissionMode()
+	if ctrl.permMode != "accept_edits" {
+		t.Fatalf("step 1: want accept_edits, got %q", ctrl.permMode)
+	}
+
+	m.cyclePermissionMode()
+	if !ctrl.plan {
+		t.Fatal("step 2: should enter plan mode")
+	}
+
+	m.cyclePermissionMode()
+	if ctrl.plan {
+		t.Fatal("step 3: should exit plan mode")
+	}
+	if ctrl.permMode != "default" {
+		t.Fatalf("step 3: want default, got %q", ctrl.permMode)
+	}
+}
+
+// M10c: permModeLabel returns expected labels.
+func TestPermModeLabel(t *testing.T) {
+	cases := []struct {
+		mode       string
+		planActive bool
+		want       string
+	}{
+		{"default", false, "ASK"},
+		{"accept_edits", false, "EDITS"},
+		{"explore", true, "PLAN"},
+		{"bypass", false, "BYPASS"},
+		{"dont_ask", false, "AUTO"},
+	}
+	for _, tc := range cases {
+		got := permModeLabel(tc.mode, tc.planActive)
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("permModeLabel(%q, %v) = %q, want to contain %q", tc.mode, tc.planActive, got, tc.want)
+		}
+	}
+}

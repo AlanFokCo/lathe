@@ -453,6 +453,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		// M10c: Shift+Tab cycles permission mode (idle only).
+		if msg.Type == tea.KeyShiftTab && m.state == stateIdle {
+			m.cyclePermissionMode()
+			m.rebuild()
+			return m, nil
+		}
 		switch {
 		case msg.Type == tea.KeyCtrlC:
 			// M8b: Ctrl+C is contextual. While a turn is running it cancels
@@ -738,9 +744,8 @@ func (m *model) statusLine() string {
 		// strip the "cost: " prefix in the status line for compactness
 		parts = append(parts, strings.TrimPrefix(est, "cost: "))
 	}
-	if m.engine.IsPlanMode() { // M7g: prominent PLAN marker so read-only mode is impossible to miss
-		parts = append(parts, warnStyle.Render("PLAN"))
-	}
+	// M10c: permission mode indicator (M7g PLAN marker subsumed here)
+	parts = append(parts, permModeLabel(m.engine.PermissionMode(), m.engine.IsPlanMode()))
 	return strings.Join(parts, " · ")
 }
 
@@ -903,5 +908,42 @@ func todoMark(state string) string {
 		return "[~]"
 	default:
 		return "[ ]"
+	}
+}
+
+// permModeLabel returns a styled mode abbreviation for the status line (M10c).
+func permModeLabel(mode string, planActive bool) string {
+	if planActive {
+		return warnStyle.Render("PLAN")
+	}
+	switch mode {
+	case "accept_edits":
+		return okStyle.Render("EDITS")
+	case "bypass":
+		return warnStyle.Render("BYPASS")
+	case "dont_ask":
+		return dimStyle.Render("AUTO")
+	default:
+		return dimStyle.Render("ASK")
+	}
+}
+
+// cyclePermissionMode rotates the effective permission mode (M10c):
+// default → accept_edits → plan → default.
+func (m *model) cyclePermissionMode() {
+	if m.engine.IsPlanMode() {
+		m.engine.ExitPlanMode()
+		m.engine.SetPermissionMode("default")
+		m.sbAppendUser("mode: default")
+		return
+	}
+	cur := m.engine.PermissionMode()
+	switch cur {
+	case "accept_edits":
+		m.engine.EnterPlanMode()
+		m.sbAppendUser("mode: plan (read-only)")
+	default:
+		m.engine.SetPermissionMode("accept_edits")
+		m.sbAppendUser("mode: accept_edits")
 	}
 }

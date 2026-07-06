@@ -150,6 +150,8 @@ var (
 	promptStyle       lipgloss.Style
 	selectedToolStyle lipgloss.Style
 	thinkingStyle     lipgloss.Style // M7a
+	okStyle           lipgloss.Style // M10c: permission mode "accept_edits"
+	dimStyle          lipgloss.Style // M10c: permission mode "default"/"dont_ask"
 )
 
 func init() { applyTheme(curTheme) }
@@ -165,6 +167,8 @@ func applyTheme(th theme.Theme) {
 	promptStyle = lipgloss.NewStyle().Foreground(th.User)
 	selectedToolStyle = lipgloss.NewStyle().Bold(true).Foreground(th.Accent)
 	thinkingStyle = lipgloss.NewStyle().Faint(true).Italic(true).Foreground(th.Tool) // M7a
+	okStyle = lipgloss.NewStyle().Foreground(th.Success)                             // M10c
+	dimStyle = lipgloss.NewStyle().Faint(true)                                       // M10c
 }
 
 // build produces the full scrollback content string at width (M5d). Replaces
