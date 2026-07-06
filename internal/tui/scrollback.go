@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/alanfokco/lathe/internal/tui/theme"
@@ -249,6 +250,9 @@ func (s *scrollback) buildTool(bl *block, width int, selected bool) string {
 		return b.String()
 	}
 	b.WriteString("\n  ↳ " + bl.summary + " " + stateMark(bl.toolState))
+	if ds := diffStat(bl.diff); ds != "" {
+		b.WriteString(" " + ds)
+	}
 	if !bl.expanded {
 		b.WriteString("\n")
 		return b.String()
@@ -263,6 +267,7 @@ func (s *scrollback) buildTool(bl *block, width int, selected bool) string {
 				out = highlightCode(out, fn, curTheme)
 			}
 		}
+		out = paginateOutput(out)
 		b.WriteString(indentBlock(wrapRaw(out, width-2), "  ") + "\n")
 	}
 	return b.String()
@@ -290,6 +295,52 @@ func indentBlock(s, prefix string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// paginateOutput truncates tool output that exceeds 200 lines, showing the
+// first 100 + last 20 with a "... (N lines hidden)" separator (M10h).
+func paginateOutput(s string) string {
+	const (
+		maxLines  = 200
+		headLines = 100
+		tailLines = 20
+	)
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s
+	}
+	hidden := len(lines) - headLines - tailLines
+	head := strings.Join(lines[:headLines], "\n")
+	tail := strings.Join(lines[len(lines)-tailLines:], "\n")
+	return head + "\n" + dimStyle.Render(fmt.Sprintf("... (%d lines hidden)", hidden)) + "\n" + tail
+}
+
+// diffStat returns a compact +N/-N summary from a unified diff string, or ""
+// if no diff lines are found (M10h).
+func diffStat(diff string) string {
+	if diff == "" {
+		return ""
+	}
+	var adds, dels int
+	for _, ln := range strings.Split(diff, "\n") {
+		if len(ln) == 0 {
+			continue
+		}
+		switch ln[0] {
+		case '+':
+			if !strings.HasPrefix(ln, "+++") {
+				adds++
+			}
+		case '-':
+			if !strings.HasPrefix(ln, "---") {
+				dels++
+			}
+		}
+	}
+	if adds == 0 && dels == 0 {
+		return ""
+	}
+	return successStyle.Render(fmt.Sprintf("+%d", adds)) + "/" + errorStyle.Render(fmt.Sprintf("-%d", dels))
 }
 
 // stateMark renders a colored state marker for a finished tool call.

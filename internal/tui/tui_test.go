@@ -929,3 +929,49 @@ func TestRenderArgPalette(t *testing.T) {
 		t.Fatal("should mention the command name")
 	}
 }
+
+// M10h: paginateOutput truncates long output.
+func TestPaginateOutput(t *testing.T) {
+	lines := make([]string, 300)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i)
+	}
+	all := strings.Join(lines, "\n")
+	got := paginateOutput(all)
+	if !strings.Contains(got, "lines hidden") {
+		t.Fatal("should contain hidden-lines notice")
+	}
+	if !strings.Contains(got, "line 0") {
+		t.Fatal("should contain head lines")
+	}
+	if !strings.Contains(got, "line 299") {
+		t.Fatal("should contain tail lines")
+	}
+	if strings.Contains(got, "line 150") {
+		t.Fatal("should NOT contain middle lines")
+	}
+}
+
+// M10h: paginateOutput passes through short output.
+func TestPaginateOutputShort(t *testing.T) {
+	short := "line 1\nline 2\nline 3"
+	if paginateOutput(short) != short {
+		t.Fatal("short output should pass through unchanged")
+	}
+}
+
+// M10h: diffStat returns +N/-N from unified diff lines.
+func TestDiffStat(t *testing.T) {
+	diff := "--- a/foo.go\n+++ b/foo.go\n@@ -1,3 +1,4 @@\n context\n-removed1\n-removed2\n+added1\n+added2\n+added3\n"
+	got := diffStat(diff)
+	if !strings.Contains(got, "+3") || !strings.Contains(got, "-2") {
+		t.Fatalf("diffStat = %q, want +3/-2", got)
+	}
+}
+
+// M10h: diffStat returns "" for empty diff.
+func TestDiffStatEmpty(t *testing.T) {
+	if diffStat("") != "" {
+		t.Fatal("empty diff should return empty string")
+	}
+}
