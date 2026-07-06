@@ -19,6 +19,42 @@ func TestCostText(t *testing.T) {
 	}
 }
 
+// TestCostTextShowsDollarEstimate — M9b: when the provider+model matches a
+// known rate, /cost includes a "$…" line so the user sees the running spend.
+func TestCostTextShowsDollarEstimate(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, &config.Config{Provider: "openai", Model: "gpt-4o"})
+	m.cumIn = 1_000_000  // $2.50 at gpt-4o input
+	m.cumOut = 1_000_000 // $10.00 at gpt-4o output
+	got := m.costText()
+	if !strings.Contains(got, "$") {
+		t.Fatalf("costText missing $ estimate:\n%s", got)
+	}
+	if !strings.Contains(got, "12.5") {
+		t.Fatalf("expected total ≈ $12.50, got:\n%s", got)
+	}
+}
+
+// TestCostTextUnknownModelSkipsDollar — an unknown model produces no $ line
+// (better than a bogus $0.00 that looks like a bug).
+func TestCostTextUnknownModelSkipsDollar(t *testing.T) {
+	m := newModel(&fakeControl{model: "unknown"}, &config.Config{Provider: "openai", Model: "unknown-model-xyz"})
+	m.cumIn, m.cumOut = 100, 50
+	if got := m.costText(); strings.Contains(got, "$") {
+		t.Fatalf("unknown model should not show $, got:\n%s", got)
+	}
+}
+
+// TestStatusLineShowsDollar — the fallback status line surfaces the running
+// dollar cost alongside token counts so users see spend at a glance.
+func TestStatusLineShowsDollar(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, &config.Config{Provider: "openai", Model: "gpt-4o"})
+	m.cumIn, m.cumOut = 1_000_000, 500_000 // $2.50 + $5.00 = $7.50
+	got := m.View()
+	if !strings.Contains(got, "$") || !strings.Contains(got, "7.5") {
+		t.Fatalf("status line missing $ estimate:\n%s", got)
+	}
+}
+
 func TestDoctorText(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, &config.Config{
 		Provider: "openai", Model: "gpt-4o", APIKey: "sk-secret123", Permission: "accept_edits",

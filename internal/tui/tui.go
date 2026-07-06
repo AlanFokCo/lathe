@@ -700,6 +700,10 @@ func (m *model) statusLine() string {
 	if cb := contextBar(m.lastIn, m.ctxSize); cb != "" { // M6c: context-window usage
 		parts = append(parts, cb)
 	}
+	if est := m.dollarEstimate(); est != "" { // M9b: running dollar spend
+		// strip the "cost: " prefix in the status line for compactness
+		parts = append(parts, strings.TrimPrefix(est, "cost: "))
+	}
 	if m.engine.IsPlanMode() { // M7g: prominent PLAN marker so read-only mode is impossible to miss
 		parts = append(parts, warnStyle.Render("PLAN"))
 	}

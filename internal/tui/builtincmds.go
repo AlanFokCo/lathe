@@ -10,17 +10,39 @@ import (
 	"time"
 
 	"github.com/alanfokco/lathe/internal/mcpconfig"
+	"github.com/alanfokco/lathe/internal/pricing"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// costText reports cumulative token usage for the session (M6c-4). Cache tokens
-// are shown when the provider reported any.
+// costText reports cumulative token usage + a dollar-cost estimate when the
+// provider+model matches a known rate (M6c-4, M9b). Cache tokens are shown
+// when the provider reported any.
 func (m *model) costText() string {
 	s := fmt.Sprintf("tokens: in=%d out=%d", m.cumIn, m.cumOut)
 	if m.cumCacheR > 0 || m.cumCacheW > 0 {
 		s += fmt.Sprintf(" · cache: read=%d write=%d", m.cumCacheR, m.cumCacheW)
 	}
+	if est := m.dollarEstimate(); est != "" {
+		s += "\n" + est
+	}
 	return s
+}
+
+// dollarEstimate returns "cost: $x.xxxx" when the model has a known rate,
+// else "". Kept as a small helper so both /cost and the status line can call it.
+func (m *model) dollarEstimate() string {
+	if m.cfg == nil {
+		return ""
+	}
+	r, ok := pricing.Lookup(m.cfg.Provider, m.cfg.Model)
+	if !ok || r.Zero() {
+		return ""
+	}
+	usd := r.Estimate(m.cumIn, m.cumOut, m.cumCacheR, m.cumCacheW)
+	if usd < 0.0001 {
+		return ""
+	}
+	return fmt.Sprintf("cost: $%.4f", usd)
 }
 
 // doctorText reports a quick diagnostic of the resolved config + environment
