@@ -8,6 +8,7 @@ import (
 
 	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/skill"
 	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/mcpconfig"
 	"github.com/alanfokco/lathe/internal/session"
@@ -42,17 +43,19 @@ type fakeControl struct {
 	slConfig      *settings.StatusLineConfig
 	cwd, sid, tp  string
 	ctxSize       int
-	mcpServers    []mcpconfig.ServerInfo  // M6c-5
-	sessions      []session.Summary       // M6c-5
-	toolNames     []string                // M6f
-	thinkingOn    bool                    // M7a
-	thinkingBud   int                     // M7a
-	thinkingCalls []string                // M7a: audit trail
-	effort        string                  // M7b
-	plan          bool                    // M7g
-	subagents     []subagent.SubagentInfo // M7e
-	jailed        bool                    // M7f
-	sandboxMode   string                  // M7f
+	mcpServers    []mcpconfig.ServerInfo        // M6c-5
+	sessions      []session.Summary             // M6c-5
+	toolNames     []string                      // M6f
+	thinkingOn    bool                          // M7a
+	thinkingBud   int                           // M7a
+	thinkingCalls []string                      // M7a: audit trail
+	effort        string                        // M7b
+	plan          bool                          // M7g
+	subagents     []subagent.SubagentInfo       // M7e
+	jailed        bool                          // M7f
+	sandboxMode   string                        // M7f
+	skills        []skill.Skill                 // M8c
+	hooks         map[string][]settings.Matcher // M8c
 }
 
 func (f *fakeControl) SetModel(name string) error {
@@ -98,6 +101,8 @@ func (f *fakeControl) SandboxMode() string {
 	}
 	return f.sandboxMode
 }
+func (f *fakeControl) SkillsList() []skill.Skill                { return f.skills }
+func (f *fakeControl) HooksList() map[string][]settings.Matcher { return f.hooks }
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 

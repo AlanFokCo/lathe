@@ -7,8 +7,10 @@ import (
 
 	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/skill"
 	"github.com/alanfokco/lathe/internal/mcpconfig"
 	"github.com/alanfokco/lathe/internal/session"
+	"github.com/alanfokco/lathe/internal/settings"
 	"github.com/alanfokco/lathe/internal/subagent"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -121,6 +123,58 @@ func TestCtrlCWhileRunningCancels(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if m.ctx == nil || m.ctx.Err() == nil {
 		t.Fatal("Ctrl+C while running should cancel the turn's ctx")
+	}
+}
+
+// TestSlashSkillsList — M8c: /skills lists discovered skills with name + one-
+// line description so users can see what the model has access to.
+func TestSlashSkillsList(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o", skills: []skill.Skill{
+		{Name: "diagram", Description: "render ASCII diagrams"},
+		{Name: "search", Description: "web search helper"},
+	}}
+	m := newModel(ctrl, testCfg())
+	if _, ok := m.maybeSlash("/skills"); !ok {
+		t.Fatal("/skills not recognized")
+	}
+	got := m.View()
+	for _, want := range []string{"diagram", "render ASCII", "search", "web search"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("/skills missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestSlashSkillsEmpty(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.maybeSlash("/skills")
+	if got := m.View(); !strings.Contains(got, "no skills") {
+		t.Fatalf("/skills empty missing message:\n%s", got)
+	}
+}
+
+// TestSlashHooksList — M8c: /hooks reports the settings.json hooks the
+// engine has wired, grouped by event so users can audit their config.
+func TestSlashHooksList(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o", hooks: map[string][]settings.Matcher{
+		"PreToolUse": {{Matcher: "Bash", Hooks: []settings.Command{{Type: "command", Command: "echo x"}}}},
+		"Stop":       {{Matcher: "", Hooks: []settings.Command{{Type: "command", Command: "notify"}}}},
+	}}
+	m := newModel(ctrl, testCfg())
+	m.maybeSlash("/hooks")
+	got := m.View()
+	for _, want := range []string{"PreToolUse", "Bash", "echo x", "Stop", "notify"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("/hooks missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestSlashHooksEmpty(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	m.maybeSlash("/hooks")
+	if got := m.View(); !strings.Contains(got, "no hooks") {
+		t.Fatalf("/hooks empty missing message:\n%s", got)
 	}
 }
 

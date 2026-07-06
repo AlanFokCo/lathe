@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -65,6 +66,55 @@ Guidance for coding agents (lathe / claude-code) working in this repository.
 ## Conventions
 -
 `
+
+// skillsText renders the /skills output: one line per discovered skill with
+// name + one-line description (M8c). Skills are read-only instructions the
+// model can view via the SkillViewer tool.
+func (m *model) skillsText() string {
+	skills := m.engine.SkillsList()
+	if len(skills) == 0 {
+		return "/skills: no skills discovered (~/.lathe/skills or <cwd>/.lathe/skills)"
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("/skills: %d\n", len(skills)))
+	for _, s := range skills {
+		desc := s.Description
+		if desc == "" {
+			desc = "(no description)"
+		}
+		b.WriteString(fmt.Sprintf("  %-24s %s\n", s.Name, desc))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// hooksText renders the /hooks output: settings.json hooks grouped by event
+// (M8c). Each matcher shows its pattern and the commands that will run.
+func (m *model) hooksText() string {
+	hooks := m.engine.HooksList()
+	if len(hooks) == 0 {
+		return "/hooks: no hooks configured (~/.lathe/settings.json)"
+	}
+	events := make([]string, 0, len(hooks))
+	for k := range hooks {
+		events = append(events, k)
+	}
+	sort.Strings(events)
+	var b strings.Builder
+	b.WriteString("/hooks:\n")
+	for _, ev := range events {
+		b.WriteString("  " + ev + ":\n")
+		for _, mt := range hooks[ev] {
+			pat := mt.Matcher
+			if pat == "" {
+				pat = "*"
+			}
+			for _, c := range mt.Hooks {
+				b.WriteString(fmt.Sprintf("    [%s] %s\n", pat, c.Command))
+			}
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
 
 // sandboxText renders the /sandbox posture report (M7f): sandbox backend,
 // workspace-root jail state, and cwd. A quick "am I safe?" for the user.

@@ -60,6 +60,7 @@ type Engine struct {
 	planActive      bool                      // M7g: /plan on flips this + swaps perm mode
 	prePlanMode     permission.PermissionMode // M7g: perm mode to restore on ExitPlanMode
 	subagents       *subagent.Tracker         // M7e: subagent lifecycle recorder for /agents
+	skillsList      []skill.Skill             // M8c: retained for /skills
 	pendingMu       sync.Mutex
 	pending         *pendingApproval // HITL bridge: last RequireUserConfirm
 }
@@ -211,7 +212,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		mcpClients: mcpClients, mcpServers: mcpServers, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
 		cwd: cwd, settings: settingsCfg, readCache: readCache,
 		taskCtx: taskCtx, thinker: thk, efforter: ef,
-		subagents: subTracker,
+		subagents: subTracker, skillsList: skillsList,
 	}
 	e.assembleAgent()
 	return e, nil
@@ -419,6 +420,19 @@ func (e *Engine) SandboxMode() string {
 		return "host"
 	}
 	return e.cfg.Sandbox
+}
+
+// SkillsList returns the skills discovered at NewEngine time (M8c). Used by
+// /skills. Empty when no ~/.lathe/skills or <cwd>/.lathe/skills entries.
+func (e *Engine) SkillsList() []skill.Skill { return e.skillsList }
+
+// HooksList returns the settings.json hook map (event → matchers) wired at
+// startup (M8c). Used by /hooks. Empty map when no hooks are configured.
+func (e *Engine) HooksList() map[string][]settings.Matcher {
+	if e.settings == nil {
+		return nil
+	}
+	return e.settings.Hooks
 }
 
 // ListModels returns model names available for the current provider.

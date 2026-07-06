@@ -46,6 +46,8 @@ func commands() []command {
 		{"plan", "enter/exit read-only plan mode (on|off)", func(m *model, rest string) tea.Cmd { return m.handlePlan(rest) }},
 		{"agents", "list subagent dispatches (Task tool)", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.agentsText()); return nil }},
 		{"sandbox", "report sandbox mode + workspace-root jail status", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.sandboxText()); return nil }},
+		{"skills", "list discovered skills", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.skillsText()); return nil }},
+		{"hooks", "list configured settings.json hooks", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.hooksText()); return nil }},
 		{"quit", "exit lathe", func(m *model, _ string) tea.Cmd { return tea.Quit }},
 	}
 }

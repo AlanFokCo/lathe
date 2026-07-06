@@ -11,6 +11,7 @@ import (
 	"time"
 
 	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/skill"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/mcpconfig"
@@ -36,19 +37,21 @@ type EngineControl interface {
 	SubmitApproval(decision string)
 	StatusInfo() (cwd, sessionID, transcriptPath string, contextSize int)
 	StatusLineConfig() *settings.StatusLineConfig
-	MCPServers() []mcpconfig.ServerInfo  // M6c-5: /mcp
-	ListSessions() []session.Summary     // M6c-5: /resume
-	ToolNames() []string                 // M6f: /tools
-	SetThinking(enable bool, budget int) // M7a: /thinking on|off|budget=N
-	Thinking() (enable bool, budget int) // M7a: report current
-	SetEffort(level string)              // M7b: /effort low|medium|high|off
-	Effort() string                      // M7b: report current
-	EnterPlanMode()                      // M7g: /plan on
-	ExitPlanMode()                       // M7g: /plan off
-	IsPlanMode() bool                    // M7g: status line + slash report
-	Subagents() []subagent.SubagentInfo  // M7e: /agents
-	Jailed() bool                        // M7f: /sandbox
-	SandboxMode() string                 // M7f: /sandbox
+	MCPServers() []mcpconfig.ServerInfo       // M6c-5: /mcp
+	ListSessions() []session.Summary          // M6c-5: /resume
+	ToolNames() []string                      // M6f: /tools
+	SetThinking(enable bool, budget int)      // M7a: /thinking on|off|budget=N
+	Thinking() (enable bool, budget int)      // M7a: report current
+	SetEffort(level string)                   // M7b: /effort low|medium|high|off
+	Effort() string                           // M7b: report current
+	EnterPlanMode()                           // M7g: /plan on
+	ExitPlanMode()                            // M7g: /plan off
+	IsPlanMode() bool                         // M7g: status line + slash report
+	Subagents() []subagent.SubagentInfo       // M7e: /agents
+	Jailed() bool                             // M7f: /sandbox
+	SandboxMode() string                      // M7f: /sandbox
+	SkillsList() []skill.Skill                // M8c: /skills
+	HooksList() map[string][]settings.Matcher // M8c: /hooks
 }
 
 type modelState int
