@@ -44,6 +44,33 @@ func TestMatchCommandsPrefix(t *testing.T) {
 	}
 }
 
+// TestSlashSandboxReports — M7f: /sandbox summarizes cwd, sandbox mode, and
+// workspace-root jail so users can audit their safety posture at a glance.
+func TestSlashSandboxReports(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o", cwd: "/proj/x", sandboxMode: "docker", jailed: true}
+	m := newModel(ctrl, testCfg())
+	if _, ok := m.maybeSlash("/sandbox"); !ok {
+		t.Fatal("/sandbox not recognized")
+	}
+	got := m.View()
+	for _, want := range []string{"/proj/x", "docker", "jail"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("/sandbox missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestSlashSandboxDefaults — no sandbox, jail off → clearly say "host" + "off".
+func TestSlashSandboxDefaults(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o", cwd: "/tmp"}
+	m := newModel(ctrl, testCfg())
+	m.maybeSlash("/sandbox")
+	got := m.View()
+	if !strings.Contains(got, "host") || !strings.Contains(got, "off") {
+		t.Fatalf("/sandbox defaults missing:\n%s", got)
+	}
+}
+
 // TestSlashAgentsList — M7e: /agents lists every subagent the parent has
 // dispatched (running or completed) so the user can trace what the Task tool
 // has done without inflating the scrollback.

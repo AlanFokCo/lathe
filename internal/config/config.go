@@ -45,6 +45,7 @@ type Config struct {
 	Thinking                bool    // M7a: enable Anthropic extended thinking
 	ThinkingBudget          int     // M7a: thinking token budget (0 = provider default)
 	ReasoningEffort         string  // M7b: OpenAI reasoning effort ("low"|"medium"|"high"); "" = provider default
+	Jail                    bool    // M7f: confine file tools to cwd via tool.WithWorkspaceRoot
 }
 
 // Flags holds CLI overrides; empty fields are unset.
@@ -56,6 +57,7 @@ type Flags struct {
 	Thinking                                                                     bool   // M7a
 	ThinkingBudget                                                               int    // M7a
 	Effort                                                                       string // M7b: reasoning effort
+	Jail                                                                         bool   // M7f: --jail
 }
 
 // Load resolves a Config from flags + env + defaults.
@@ -110,6 +112,12 @@ func Load(f Flags) (*Config, error) {
 	cfg.ReasoningEffort = f.Effort
 	if cfg.ReasoningEffort == "" {
 		cfg.ReasoningEffort = os.Getenv("LATHE_EFFORT")
+	}
+	// M7f: workspace-root jail. Flag > env; default off so existing scripts
+	// that touch files outside cwd keep working (users opt in for hardening).
+	cfg.Jail = f.Jail
+	if !cfg.Jail && envTruthy(os.Getenv("LATHE_JAIL")) {
+		cfg.Jail = true
 	}
 
 	if f.Provider != "" {

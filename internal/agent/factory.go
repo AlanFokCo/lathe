@@ -403,6 +403,24 @@ func (e *Engine) Subagents() []subagent.SubagentInfo {
 	return e.subagents.List()
 }
 
+// Jailed reports whether file tools are confined to cwd via
+// tool.WithWorkspaceRoot injected in Run's ctx (M7f).
+func (e *Engine) Jailed() bool {
+	if e.cfg == nil {
+		return false
+	}
+	return e.cfg.Jail
+}
+
+// SandboxMode returns "host" when cfg.Sandbox is empty, else the raw mode
+// string ("docker"/"e2b"). Used by /sandbox for a quick posture report.
+func (e *Engine) SandboxMode() string {
+	if e.cfg == nil || e.cfg.Sandbox == "" {
+		return "host"
+	}
+	return e.cfg.Sandbox
+}
+
 // ListModels returns model names available for the current provider.
 func (e *Engine) ListModels() []string {
 	var out []string

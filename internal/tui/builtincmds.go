@@ -66,6 +66,18 @@ Guidance for coding agents (lathe / claude-code) working in this repository.
 -
 `
 
+// sandboxText renders the /sandbox posture report (M7f): sandbox backend,
+// workspace-root jail state, and cwd. A quick "am I safe?" for the user.
+func (m *model) sandboxText() string {
+	cwd, _, _, _ := m.engine.StatusInfo()
+	jail := "off"
+	if m.engine.Jailed() {
+		jail = "on"
+	}
+	return fmt.Sprintf("/sandbox:\n  backend:      %s\n  workspace jail: %s\n  cwd:          %s",
+		m.engine.SandboxMode(), jail, cwd)
+}
+
 // agentsText renders the /agents output: one line per subagent dispatched by
 // the Task tool this session (M7e). Includes status + description + duration
 // + output-byte size — enough to trace what the parent has offloaded without

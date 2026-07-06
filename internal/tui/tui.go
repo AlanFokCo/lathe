@@ -47,6 +47,8 @@ type EngineControl interface {
 	ExitPlanMode()                       // M7g: /plan off
 	IsPlanMode() bool                    // M7g: status line + slash report
 	Subagents() []subagent.SubagentInfo  // M7e: /agents
+	Jailed() bool                        // M7f: /sandbox
+	SandboxMode() string                 // M7f: /sandbox
 }
 
 type modelState int

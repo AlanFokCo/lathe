@@ -40,6 +40,13 @@ func (e *Engine) runWrap(ctx context.Context, prompt string, ch chan<- asevent.E
 	if e.taskCtx != nil {
 		ctx = tool.WithTaskContext(ctx, e.taskCtx)
 	}
+	// M7f: workspace-root jail. When enabled, tool.WithWorkspaceRoot confines
+	// every file tool (Read/Write/Edit/MultiEdit/ApplyPatch/Glob/Grep) to cwd
+	// — symlink-aware, so a symlinked parent cannot escape. Off by default so
+	// existing scripts that touch /tmp keep working.
+	if e.cfg != nil && e.cfg.Jail && e.cwd != "" {
+		ctx = tool.WithWorkspaceRoot(ctx, e.cwd)
+	}
 	// M7g: plan mode preamble. Prepended so the model knows to produce a plan
 	// instead of trying to modify files (the perm engine also enforces this
 	// via ModeExplore denials, but a proactive preamble avoids wasted tool

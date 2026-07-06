@@ -51,6 +51,8 @@ type fakeControl struct {
 	effort        string                  // M7b
 	plan          bool                    // M7g
 	subagents     []subagent.SubagentInfo // M7e
+	jailed        bool                    // M7f
+	sandboxMode   string                  // M7f
 }
 
 func (f *fakeControl) SetModel(name string) error {
@@ -89,6 +91,13 @@ func (f *fakeControl) EnterPlanMode()                     { f.plan = true }
 func (f *fakeControl) ExitPlanMode()                      { f.plan = false }
 func (f *fakeControl) IsPlanMode() bool                   { return f.plan }
 func (f *fakeControl) Subagents() []subagent.SubagentInfo { return f.subagents }
+func (f *fakeControl) Jailed() bool                       { return f.jailed }
+func (f *fakeControl) SandboxMode() string {
+	if f.sandboxMode == "" {
+		return "host"
+	}
+	return f.sandboxMode
+}
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 

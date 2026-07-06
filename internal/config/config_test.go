@@ -203,6 +203,43 @@ func TestLoadEffortDefaultEmpty(t *testing.T) {
 	}
 }
 
+// TestLoadJailFlag — M7f: --jail sets cfg.Jail. Default is off so existing
+// scripts / tests that read paths outside cwd keep working; users opt in.
+func TestLoadJailFlag(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	cfg, err := Load(Flags{Prompt: "hi", Jail: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Jail {
+		t.Fatal("Jail flag not propagated")
+	}
+}
+
+func TestLoadJailEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	t.Setenv("LATHE_JAIL", "1")
+	cfg, err := Load(Flags{Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Jail {
+		t.Fatal("LATHE_JAIL=1 not honored")
+	}
+}
+
+func TestLoadJailDefaultOff(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
+	t.Setenv("LATHE_JAIL", "")
+	cfg, err := Load(Flags{Prompt: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Jail {
+		t.Fatal("Jail should default off")
+	}
+}
+
 func TestLoadOllamaMissingModel(t *testing.T) {
 	cfg, err := Load(Flags{Provider: "ollama"})
 	if err != nil {
