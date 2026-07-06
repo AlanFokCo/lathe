@@ -786,3 +786,68 @@ func TestFormatToolInputTruncation(t *testing.T) {
 		t.Fatal("truncated input should end with …")
 	}
 }
+
+// M10e: highlightMatches wraps matches in reverse-video ANSI.
+func TestHighlightMatches(t *testing.T) {
+	got := highlightMatches("Hello world, hello again", "hello")
+	if !strings.Contains(got, "\x1b[7m") {
+		t.Fatal("should contain reverse-video escape")
+	}
+	if strings.Count(got, "\x1b[7m") != 2 {
+		t.Fatalf("should highlight 2 matches, got %d", strings.Count(got, "\x1b[7m"))
+	}
+}
+
+// M10e: search mode toggles on Ctrl+F.
+func TestSearchModeToggle(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+	m.width = 80
+	m.height = 24
+
+	if m.searchActive {
+		t.Fatal("search should start inactive")
+	}
+
+	// Ctrl+F activates
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlF})
+	if !m.searchActive {
+		t.Fatal("Ctrl+F should activate search")
+	}
+
+	// type a query
+	m.handleSearchKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	m.handleSearchKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	if m.searchQuery != "fo" {
+		t.Fatalf("query should be 'fo', got %q", m.searchQuery)
+	}
+
+	// backspace
+	m.handleSearchKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	if m.searchQuery != "f" {
+		t.Fatalf("backspace should remove last char, got %q", m.searchQuery)
+	}
+
+	// Esc exits
+	m.handleSearchKey(tea.KeyMsg{Type: tea.KeyEscape})
+	if m.searchActive {
+		t.Fatal("Esc should deactivate search")
+	}
+}
+
+// M10e: View shows search bar when active.
+func TestSearchBarInView(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o"}
+	m := newModel(ctrl, testCfg())
+	m.width = 80
+	m.height = 24
+	m.searchActive = true
+	m.searchQuery = "test"
+	got := m.View()
+	if !strings.Contains(got, "search:") {
+		t.Fatal("view should show search bar when active")
+	}
+	if !strings.Contains(got, "test") {
+		t.Fatal("view should show the search query")
+	}
+}

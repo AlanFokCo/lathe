@@ -109,6 +109,9 @@ type model struct {
 	todoBufs       map[string]*strings.Builder // M6h: id → task_* payload accumulator
 	hist           *history                    // M8b: ↑/↓ input history recall
 	lastCtrlC      time.Time                   // M8b: Ctrl+C double-confirm timestamp
+	searchActive   bool                        // M10e: Ctrl+F search mode
+	searchQuery    string                      // M10e: current search string
+	searchIdx      int                         // M10e: current match index (for next/prev)
 	filepick       *filePicker                 // M9c: @file autocomplete backend
 	pickerCursor   int                         // M9c: selected file-picker match index
 }
@@ -163,7 +166,11 @@ func (m *model) rebuild() {
 	m.rebuildN++ // M6a: observability for the redraw-throttle test
 	m.applyLayout()
 	atBottom := m.viewport.AtBottom()
-	m.viewport.SetContent(m.sb.build(m.wrapWidth(), m.selectedTool))
+	content := m.sb.build(m.wrapWidth(), m.selectedTool)
+	if q := m.searchHighlight(); q != "" {
+		content = highlightMatches(content, q)
+	}
+	m.viewport.SetContent(content)
 	if atBottom {
 		m.viewport.GotoBottom()
 	}
@@ -453,6 +460,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
+		}
+		// M10e: Ctrl+F search mode — intercept keys before normal dispatch.
+		if m.searchActive {
+			return m.handleSearchKey(msg), nil
+		}
+		if msg.Type == tea.KeyCtrlF && m.state == stateIdle {
+			m.searchActive = true
+			m.searchQuery = ""
+			m.searchIdx = 0
+			m.rebuild()
+			return m, nil
 		}
 		// M10c: Shift+Tab cycles permission mode (idle only).
 		if msg.Type == tea.KeyShiftTab && m.state == stateIdle {
@@ -867,6 +885,10 @@ func (m *model) View() string {
 			mid = warnStyle.Render("Ctrl+C again to quit") // M8b
 		}
 	}
+	// M10e: search bar replaces the mid line when active.
+	if m.searchActive {
+		mid = warnStyle.Render("search: ") + m.searchQuery + dimStyle.Render("  (Enter=next, Ctrl+P=prev, Esc=close)")
+	}
 	pane := m.todoPane()
 	if pane != "" {
 		return pane + "\n" + m.viewport.View() + "\n" + mid + "\n" + bottom
@@ -910,6 +932,70 @@ func todoMark(state string) string {
 	default:
 		return "[ ]"
 	}
+}
+
+// highlightMatches wraps case-insensitive occurrences of query in the content
+// with ANSI reverse-video (M10e).
+func highlightMatches(content, query string) string {
+	if query == "" {
+		return content
+	}
+	lower := strings.ToLower(content)
+	lq := strings.ToLower(query)
+	var b strings.Builder
+	b.Grow(len(content))
+	pos := 0
+	for {
+		idx := strings.Index(lower[pos:], lq)
+		if idx < 0 {
+			b.WriteString(content[pos:])
+			break
+		}
+		b.WriteString(content[pos : pos+idx])
+		b.WriteString("\x1b[7m")
+		b.WriteString(content[pos+idx : pos+idx+len(query)])
+		b.WriteString("\x1b[27m")
+		pos += idx + len(query)
+	}
+	return b.String()
+}
+
+// handleSearchKey processes a keystroke while in Ctrl+F search mode (M10e).
+func (m *model) handleSearchKey(msg tea.KeyMsg) *model {
+	switch msg.Type {
+	case tea.KeyEscape:
+		m.searchActive = false
+		m.searchQuery = ""
+		m.rebuild()
+	case tea.KeyEnter, tea.KeyCtrlN:
+		m.searchIdx++
+		m.rebuild()
+	case tea.KeyCtrlP:
+		if m.searchIdx > 0 {
+			m.searchIdx--
+		}
+		m.rebuild()
+	case tea.KeyBackspace:
+		if len(m.searchQuery) > 0 {
+			m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
+			m.searchIdx = 0
+			m.rebuild()
+		}
+	case tea.KeyRunes:
+		m.searchQuery += string(msg.Runes)
+		m.searchIdx = 0
+		m.rebuild()
+	}
+	return m
+}
+
+// searchHighlight returns the active search query for scrollback highlighting,
+// or "" when search is inactive (M10e).
+func (m *model) searchHighlight() string {
+	if !m.searchActive || m.searchQuery == "" {
+		return ""
+	}
+	return m.searchQuery
 }
 
 // approvalBar renders the tool-approval prompt line with formatted args (M10d).
