@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/workspace"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/workspace"
 )
 
 // NewWorkspace builds a sandboxed workspace of the given kind.

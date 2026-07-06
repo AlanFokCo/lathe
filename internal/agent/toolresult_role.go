@@ -3,9 +3,9 @@ package agent
 import (
 	"context"
 
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/middleware"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/middleware"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/model"
 )
 
 // toolResultRoleMiddleware is a lathe product-layer adapter (M6a) that rewrites

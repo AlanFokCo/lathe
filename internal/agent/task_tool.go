@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
+	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/model"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/permission"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/tool"
 )
 
 var taskToolSchema = json.RawMessage(`{

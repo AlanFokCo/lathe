@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/workspace"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/tool"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/workspace"
 )
 
 // WorkspaceToolkit returns a Toolkit of Bash/Read/Write/Edit/Glob/Grep tools

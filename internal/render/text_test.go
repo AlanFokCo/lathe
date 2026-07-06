@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
+	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
 )
 
 func TestRenderText(t *testing.T) {

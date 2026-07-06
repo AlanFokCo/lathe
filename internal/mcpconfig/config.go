@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/mcp"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/mcp"
 )
 
 // ServerConfig is one MCP server entry from .mcp.json.

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
+	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
 )
 
 func TestRenderStreamJSON(t *testing.T) {

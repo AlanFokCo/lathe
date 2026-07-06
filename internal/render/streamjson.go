@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"io"
 
-	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
+	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
 )
 
 // RenderStreamJSON writes one JSON object per agentscope event to out (NDJSON).

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
+	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
 	"github.com/alanfokco/lathe/internal/config"
 	"github.com/alanfokco/lathe/internal/settings"
 	"github.com/alanfokco/lathe/internal/statusline"

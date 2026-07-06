@@ -10,7 +10,7 @@ import (
 	"io"
 	"strings"
 
-	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
+	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
 )
 
 // RenderText writes streamed text to out (stdout) and tool/usage annotations

@@ -3,9 +3,9 @@ package agent
 import (
 	"context"
 
-	asevent "github.com/alanfokco/agentscope-go/pkg/agentscope/event"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
+	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/permission"
 )
 
 // Run executes the agent for a single user prompt, streaming agentscope block-

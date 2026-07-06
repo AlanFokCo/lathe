@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
 )
 
 // Session is a persisted conversation. Path is the JSONL file path (derived,

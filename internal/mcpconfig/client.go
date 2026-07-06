@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/mcp"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/mcp"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/tool"
 )
 
 // MCPGroup is the set of tools discovered from one MCP server.

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/credential"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/credential"
 )
 
 // Version is the lathe version surfaced to the statusline payload. Wire to

@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/tool"
 )
 
 // buildSystemPrompt assembles the coding-agent system prompt: base role,

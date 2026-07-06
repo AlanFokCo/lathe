@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/message"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/model"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/permission"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/tool"
 )
 
 // extractText pulls the concatenated text out of a ToolResponse's Content blocks.

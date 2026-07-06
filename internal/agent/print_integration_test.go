@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/model"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/permission"
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/tool"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/model"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/permission"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/render"
 )
 

@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/skill"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/skill"
 )
 
 // Discover loads skills from ~/.lathe/skills (user-level) and from each

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alanfokco/agentscope-go/pkg/agentscope/skill"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/skill"
 )
 
 // writeSkill writes a SKILL.md (YAML frontmatter name+description + body) into dir.
