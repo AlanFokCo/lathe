@@ -66,8 +66,17 @@ type Flags struct {
 	ContextSize                                                                  int     // M9d: --context-size
 }
 
-// Load resolves a Config from flags + env + defaults.
+// Load resolves a Config from flags + env + TOML + defaults (M9e). Resolution
+// order: flag > env > TOML (~/.lathe/config.toml) > defaults.
 func Load(f Flags) (*Config, error) {
+	// M9e: fill empty flag fields from ~/.lathe/config.toml first, so the
+	// downstream flag/env resolution still gets to override anything the
+	// user set explicitly.
+	if t, terr := LoadTOML(DefaultTOMLPath()); terr != nil {
+		return nil, terr
+	} else {
+		f = mergeTOMLIntoFlags(f, t)
+	}
 	cfg := &Config{
 		Permission:              "accept_edits",
 		Output:                  OutputText,
