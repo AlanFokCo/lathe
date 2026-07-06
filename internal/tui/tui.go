@@ -71,8 +71,11 @@ type model struct {
 	viewport       viewport.Model
 	selectedTool   int // M5d: index into sb.blocks of the highlighted tool block, -1 none
 	cwd            string
-	dirty          bool // M6a: TextDelta marked scrollback dirty; drained by formatTick
-	rebuildN       int  // M6a: rebuild() call counter (test observability)
+	dirty          bool      // M6a: TextDelta marked scrollback dirty; drained by formatTick
+	rebuildN       int       // M6a: rebuild() call counter (test observability)
+	turnStart      time.Time // M6c: current turn start, for elapsed + tok/s
+	lastIn         int       // M6c: last ModelCallEnd InputTokens ≈ context used
+	ctxSize        int       // M6c: model context-window size (from StatusInfo)
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
@@ -83,8 +86,8 @@ func newModel(engine EngineControl, cfg *config.Config) *model {
 	ta.SetWidth(80)
 	sp := spinner.New()
 	vp := viewport.New(80, 24)
-	cwd, _, _, _ := engine.StatusInfo()
-	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle, spinner: sp, viewport: vp, selectedTool: -1, cwd: cwd}
+	cwd, _, _, ctxSize := engine.StatusInfo()
+	return &model{engine: engine, cfg: cfg, input: ta, state: stateIdle, spinner: sp, viewport: vp, selectedTool: -1, cwd: cwd, ctxSize: ctxSize}
 }
 
 // wrapWidth returns the terminal width for wrapping/glamour, defaulting to 80
@@ -104,6 +107,7 @@ func (m *model) submit(prompt string) tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx, m.cancel = ctx, cancel
 	m.state = stateRunning
+	m.turnStart = time.Now() // M6c: for elapsed + tok/s in the activity line
 	m.eventCh = m.engine.Run(ctx, prompt)
 	return tea.Batch(waitForEvent(m.eventCh), m.spinner.Tick, scheduleFormatTick())
 }
@@ -367,6 +371,7 @@ func (m *model) handleEvent(ev asevent.Event) {
 	case asevent.ModelCallEndEvent:
 		m.cumIn += e.InputTokens
 		m.cumOut += e.OutputTokens
+		m.lastIn = e.InputTokens // M6c: last request's input ≈ current context usage
 	case asevent.ToolCallStartEvent:
 		// M6b: ToolCallStartEvent now carries the tool's JSON input (enriched
 		// upstream) — used for the header arg + lexer selection.
@@ -477,6 +482,9 @@ func (m *model) statusLine() string {
 		parts = append(parts, m.cwd)
 	}
 	parts = append(parts, fmt.Sprintf("in=%d out=%d", m.cumIn, m.cumOut))
+	if cb := contextBar(m.lastIn, m.ctxSize); cb != "" { // M6c: context-window usage
+		parts = append(parts, cb)
+	}
 	return strings.Join(parts, " · ")
 }
 
@@ -491,7 +499,15 @@ func (m *model) activityLine() string {
 	if m.phase == phaseRunning {
 		label = "running " + m.curTool
 	}
-	return m.spinner.View() + " " + label
+	out := m.spinner.View() + " " + label
+	if !m.turnStart.IsZero() { // M6c: elapsed + throughput
+		d := time.Since(m.turnStart)
+		out += " · " + formatElapsed(d)
+		if tps := tokPerSec(m.cumOut, d); tps > 0 {
+			out += fmt.Sprintf(" · %d tok/s", tps)
+		}
+	}
+	return out
 }
 
 // maybeSlash dispatches a "/cmd rest" input via the command registry (M6c).
