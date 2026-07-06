@@ -10,7 +10,7 @@ import (
 )
 
 func TestCommandRegistryHasCoreCommands(t *testing.T) {
-	for _, name := range []string{"help", "clear", "compact", "model", "theme", "config", "mcp", "resume", "quit"} {
+	for _, name := range []string{"help", "clear", "compact", "model", "theme", "config", "mcp", "resume", "tools", "quit"} {
 		if _, ok := lookupCommand(name); !ok {
 			t.Fatalf("registry missing /%s", name)
 		}
@@ -37,6 +37,33 @@ func TestMatchCommandsPrefix(t *testing.T) {
 	}
 	if names["help"] {
 		t.Fatalf("matchCommands(c) should not include help")
+	}
+}
+
+// TestSlashToolsList — M6f: /tools lists every tool the engine exposes to the
+// model (Bash/Read/Edit/MultiEdit/ApplyPatch/... + MCP + skills + task).
+// Empty inventory falls back to a "no tools" message.
+func TestSlashToolsList(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o", toolNames: []string{"Bash", "Edit", "MultiEdit", "ApplyPatch"}}
+	m := newModel(ctrl, testCfg())
+	if _, ok := m.maybeSlash("/tools"); !ok {
+		t.Fatal("/tools not recognized")
+	}
+	got := m.View()
+	for _, want := range []string{"Bash", "Edit", "MultiEdit", "ApplyPatch"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("/tools missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestSlashToolsEmpty(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	if _, ok := m.maybeSlash("/tools"); !ok {
+		t.Fatal("/tools not recognized")
+	}
+	if got := m.View(); !strings.Contains(got, "no tools") {
+		t.Fatalf("/tools empty missing message:\n%s", got)
 	}
 }
 

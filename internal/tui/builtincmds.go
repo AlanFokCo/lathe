@@ -65,6 +65,22 @@ Guidance for coding agents (lathe / claude-code) working in this repository.
 -
 `
 
+// toolsText renders the /tools output: the full alphabetized list of tools
+// the model can call this turn (M6f). Includes builtins (Bash/Read/Edit/
+// MultiEdit/ApplyPatch/…), MCP-discovered tools, skills viewer, and Task.
+func (m *model) toolsText() string {
+	names := m.engine.ToolNames()
+	if len(names) == 0 {
+		return "/tools: no tools registered"
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("/tools: %d tool(s)\n", len(names)))
+	for _, n := range names {
+		b.WriteString("  " + n + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // mcpText renders the /mcp output: one line per configured MCP server with its
 // tool count, or a "no MCP servers configured" hint (M6c-5). The snapshot is
 // taken by NewEngine so this is just a read.

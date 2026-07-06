@@ -43,6 +43,7 @@ type fakeControl struct {
 	ctxSize       int
 	mcpServers    []mcpconfig.ServerInfo // M6c-5
 	sessions      []session.Summary      // M6c-5
+	toolNames     []string               // M6f
 }
 
 func (f *fakeControl) SetModel(name string) error {
@@ -66,6 +67,7 @@ func (f *fakeControl) StatusInfo() (string, string, string, int) {
 func (f *fakeControl) StatusLineConfig() *settings.StatusLineConfig { return f.slConfig }
 func (f *fakeControl) MCPServers() []mcpconfig.ServerInfo           { return f.mcpServers }
 func (f *fakeControl) ListSessions() []session.Summary              { return f.sessions }
+func (f *fakeControl) ToolNames() []string                          { return f.toolNames }
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 

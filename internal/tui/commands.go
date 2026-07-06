@@ -40,6 +40,7 @@ func commands() []command {
 		{"init", "scaffold a CLAUDE.md in the cwd", func(m *model, _ string) tea.Cmd { return m.handleInit() }},
 		{"mcp", "list configured MCP servers", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.mcpText()); return nil }},
 		{"resume", "list historical sessions in the cwd", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.resumeText()); return nil }},
+		{"tools", "list tools exposed to the model", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.toolsText()); return nil }},
 		{"quit", "exit lathe", func(m *model, _ string) tea.Cmd { return tea.Quit }},
 	}
 }

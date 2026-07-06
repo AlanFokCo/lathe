@@ -241,6 +241,57 @@ func TestNewEngineWiresHookSettings(t *testing.T) {
 	}
 }
 
+// TestNewEngineExposesEnhancedToolkit — M6f: MultiEdit/ApplyPatch are provided
+// for free by tool.NewEnhancedToolkit(); lock in the wiring so a future
+// refactor to a smaller default toolkit doesn't silently drop them.
+func TestNewEngineExposesEnhancedToolkit(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "proj")
+	mustMkdir(t, work)
+	t.Setenv("HOME", home)
+	t.Chdir(work)
+
+	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "bypass", MaxIters: 10}
+	eng, err := NewEngine(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	for _, name := range []string{"Bash", "Read", "Write", "Edit", "MultiEdit", "ApplyPatch", "Glob", "Grep"} {
+		if eng.toolkit.Get(name) == nil {
+			t.Fatalf("toolkit missing enhanced tool %q", name)
+		}
+	}
+}
+
+// TestEngineToolNamesReportsFullInventory — M6f: /tools relies on ToolNames()
+// to enumerate the exposed set; the list should be non-empty and include the
+// core enhanced tools.
+func TestEngineToolNamesReportsFullInventory(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "proj")
+	mustMkdir(t, work)
+	t.Setenv("HOME", home)
+	t.Chdir(work)
+
+	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "bypass", MaxIters: 10}
+	eng, err := NewEngine(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	names := eng.ToolNames()
+	seen := map[string]bool{}
+	for _, n := range names {
+		seen[n] = true
+	}
+	for _, want := range []string{"Bash", "Read", "Edit", "MultiEdit", "ApplyPatch"} {
+		if !seen[want] {
+			t.Fatalf("ToolNames missing %q; got %v", want, names)
+		}
+	}
+}
+
 func TestNewEngineRegistersTaskTool(t *testing.T) {
 	home := t.TempDir()
 	work := filepath.Join(home, "proj")

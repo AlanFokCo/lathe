@@ -35,6 +35,7 @@ type EngineControl interface {
 	StatusLineConfig() *settings.StatusLineConfig
 	MCPServers() []mcpconfig.ServerInfo // M6c-5: /mcp
 	ListSessions() []session.Summary    // M6c-5: /resume
+	ToolNames() []string                // M6f: /tools
 }
 
 type modelState int

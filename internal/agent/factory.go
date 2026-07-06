@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -324,6 +325,23 @@ func (e *Engine) MCPServers() []mcpconfig.ServerInfo { return e.mcpServers }
 // /resume to render a list + `lathe --resume <id>` hint (in-process reload
 // is deferred).
 func (e *Engine) ListSessions() []session.Summary { return session.List(e.cwd) }
+
+// ToolNames returns the names of every tool exposed to the model (M6f), sorted
+// alphabetically. Used by /tools to give the user visibility into the active
+// toolkit — builtin (Bash/Read/Edit/MultiEdit/ApplyPatch/…), MCP-discovered,
+// skills viewer, and the Task subagent tool all end up here.
+func (e *Engine) ToolNames() []string {
+	schemas := e.toolkit.GetToolSchemas()
+	if len(schemas) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(schemas))
+	for _, s := range schemas {
+		out = append(out, s.Function.Name)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // Close releases engine resources, including MCP client connections. It is
 // idempotent and best-effort (per-client errors are ignored).
