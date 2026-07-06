@@ -10,6 +10,7 @@ import (
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/model"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/permission"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/tool"
+	"github.com/alanfokco/lathe/internal/subagent"
 )
 
 var taskToolSchema = json.RawMessage(`{
@@ -36,11 +37,19 @@ type TaskTool struct {
 	permEng    *permission.Engine
 	maxIters   int
 	subToolkit *tool.Toolkit
+	tracker    *subagent.Tracker // M7e: optional lifecycle recorder (nil = no tracking)
 }
 
-// NewTaskTool builds a Task tool. subToolkit is the toolkit the subagent uses
-// (production: a fresh NewEnhancedToolkit; tests: an injected toolkit).
+// NewTaskTool builds a Task tool without lifecycle tracking. Kept for the
+// existing test suite; production callers should prefer NewTaskToolWithTracker.
 func NewTaskTool(cm model.ChatModel, permEng *permission.Engine, maxIters int, subToolkit *tool.Toolkit) tool.Tool {
+	return NewTaskToolWithTracker(cm, permEng, maxIters, subToolkit, nil)
+}
+
+// NewTaskToolWithTracker builds a Task tool that records subagent dispatches
+// into tracker (M7e). tracker may be nil, in which case behaviour matches
+// NewTaskTool.
+func NewTaskToolWithTracker(cm model.ChatModel, permEng *permission.Engine, maxIters int, subToolkit *tool.Toolkit, tracker *subagent.Tracker) tool.Tool {
 	return &TaskTool{
 		BaseTool: tool.BaseTool{
 			ToolName:        "Task",
@@ -51,17 +60,25 @@ func NewTaskTool(cm model.ChatModel, permEng *permission.Engine, maxIters int, s
 		permEng:    permEng,
 		maxIters:   maxIters,
 		subToolkit: subToolkit,
+		tracker:    tracker,
 	}
 }
 
 // Execute spawns the subagent, runs it to completion, and returns its
 // accumulated text output (all TextDelta across turns; tool results are not
 // included). It blocks until the subagent finishes (end_turn/max_iters/
-// cancelled/error) or the ctx is cancelled.
+// cancelled/error) or the ctx is cancelled. M7e: when a tracker is attached,
+// records the dispatch with the "description" arg as the label and marks
+// completion with output length so /agents can show what happened.
 func (t *TaskTool) Execute(ctx context.Context, input map[string]any) (*tool.ToolResponse, error) {
 	prompt, _ := input["prompt"].(string)
 	if prompt == "" {
 		return tool.NewErrorResponse(fmt.Errorf("prompt is required")), nil
+	}
+	description, _ := input["description"].(string)
+	var trackID string
+	if t.tracker != nil {
+		trackID = t.tracker.Start(description)
 	}
 	sub := newSubagentEngine("lathe-subagent", subagentSysPrompt, t.chatModel, t.subToolkit, t.permEng, t.maxIters)
 	ch := sub.Run(ctx, prompt)
@@ -71,7 +88,11 @@ func (t *TaskTool) Execute(ctx context.Context, input map[string]any) (*tool.Too
 			text.WriteString(td.Delta)
 		}
 	}
-	return tool.NewTextResponse(text.String()), nil
+	out := text.String()
+	if t.tracker != nil {
+		t.tracker.Complete(trackID, "completed", len(out))
+	}
+	return tool.NewTextResponse(out), nil
 }
 
 // CheckPermissions auto-allows the Task tool (it is a meta-tool; the subagent's

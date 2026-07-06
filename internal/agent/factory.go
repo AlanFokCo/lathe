@@ -24,6 +24,7 @@ import (
 	"github.com/alanfokco/lathe/internal/session"
 	"github.com/alanfokco/lathe/internal/settings"
 	"github.com/alanfokco/lathe/internal/skills"
+	"github.com/alanfokco/lathe/internal/subagent"
 	"github.com/alanfokco/lathe/internal/workspace"
 	"github.com/sirupsen/logrus"
 )
@@ -58,6 +59,7 @@ type Engine struct {
 	efforter        *efforter                 // M7b: reasoning-effort option wrapper (live-toggleable)
 	planActive      bool                      // M7g: /plan on flips this + swaps perm mode
 	prePlanMode     permission.PermissionMode // M7g: perm mode to restore on ExitPlanMode
+	subagents       *subagent.Tracker         // M7e: subagent lifecycle recorder for /agents
 	pendingMu       sync.Mutex
 	pending         *pendingApproval // HITL bridge: last RequireUserConfirm
 }
@@ -133,8 +135,10 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 
 	// M4d: Task subagent tool (spawns a nested lathe Engine with a builtins-only
 	// toolkit — no Task, so the subagent cannot recurse). In sandbox mode the
-	// subagent shares the same workspace (no escape).
-	tk.AddGroup("task", NewTaskTool(cm, permEng, cfg.MaxIters, subToolkit))
+	// subagent shares the same workspace (no escape). M7e: shares an engine-
+	// level tracker so /agents can list dispatched subagents.
+	subTracker := subagent.NewTracker()
+	tk.AddGroup("task", NewTaskToolWithTracker(cm, permEng, cfg.MaxIters, subToolkit, subTracker))
 
 	// M6h: TodoWrite toolkit — task_create/get/list/update backed by a per-
 	// engine TaskContext (injected into every Run's ctx). TUI consumes the
@@ -207,6 +211,7 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		mcpClients: mcpClients, mcpServers: mcpServers, hookRunner: hookRunner, workspaceCloser: workspaceCloser,
 		cwd: cwd, settings: settingsCfg, readCache: readCache,
 		taskCtx: taskCtx, thinker: thk, efforter: ef,
+		subagents: subTracker,
 	}
 	e.assembleAgent()
 	return e, nil
@@ -388,6 +393,15 @@ func (e *Engine) ExitPlanMode() {
 
 // IsPlanMode reports whether the engine is currently in plan mode (M7g).
 func (e *Engine) IsPlanMode() bool { return e.planActive }
+
+// Subagents returns a snapshot of subagent dispatches recorded by the Task
+// tool during this session (M7e). Used by /agents.
+func (e *Engine) Subagents() []subagent.SubagentInfo {
+	if e.subagents == nil {
+		return nil
+	}
+	return e.subagents.List()
+}
 
 // ListModels returns model names available for the current provider.
 func (e *Engine) ListModels() []string {

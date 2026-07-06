@@ -44,6 +44,7 @@ func commands() []command {
 		{"thinking", "toggle extended thinking (on|off|budget=N)", func(m *model, rest string) tea.Cmd { return m.handleThinking(rest) }},
 		{"effort", "set reasoning effort (low|medium|high|off)", func(m *model, rest string) tea.Cmd { return m.handleEffort(rest) }},
 		{"plan", "enter/exit read-only plan mode (on|off)", func(m *model, rest string) tea.Cmd { return m.handlePlan(rest) }},
+		{"agents", "list subagent dispatches (Task tool)", func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.agentsText()); return nil }},
 		{"quit", "exit lathe", func(m *model, _ string) tea.Cmd { return tea.Quit }},
 	}
 }

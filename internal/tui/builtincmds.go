@@ -66,6 +66,35 @@ Guidance for coding agents (lathe / claude-code) working in this repository.
 -
 `
 
+// agentsText renders the /agents output: one line per subagent dispatched by
+// the Task tool this session (M7e). Includes status + description + duration
+// + output-byte size — enough to trace what the parent has offloaded without
+// pulling the subagent transcript into the scrollback.
+func (m *model) agentsText() string {
+	agents := m.engine.Subagents()
+	if len(agents) == 0 {
+		return "/agents: no subagents dispatched this session"
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("/agents: %d dispatch(es)\n", len(agents)))
+	for _, a := range agents {
+		short := a.ID
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		desc := a.Description
+		if desc == "" {
+			desc = "(no description)"
+		}
+		line := fmt.Sprintf("  %s  %-10s  %s", short, a.Status, desc)
+		if a.Duration > 0 {
+			line += fmt.Sprintf("  (%s, %d bytes)", a.Duration.Truncate(time.Millisecond), a.OutputBytes)
+		}
+		b.WriteString(line + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // toolsText renders the /tools output: the full alphabetized list of tools
 // the model can call this turn (M6f). Includes builtins (Bash/Read/Edit/
 // MultiEdit/ApplyPatch/…), MCP-discovered tools, skills viewer, and Task.

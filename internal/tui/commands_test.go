@@ -9,6 +9,7 @@ import (
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/alanfokco/lathe/internal/mcpconfig"
 	"github.com/alanfokco/lathe/internal/session"
+	"github.com/alanfokco/lathe/internal/subagent"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -40,6 +41,36 @@ func TestMatchCommandsPrefix(t *testing.T) {
 	}
 	if names["help"] {
 		t.Fatalf("matchCommands(c) should not include help")
+	}
+}
+
+// TestSlashAgentsList — M7e: /agents lists every subagent the parent has
+// dispatched (running or completed) so the user can trace what the Task tool
+// has done without inflating the scrollback.
+func TestSlashAgentsList(t *testing.T) {
+	ctrl := &fakeControl{model: "gpt-4o", subagents: []subagent.SubagentInfo{
+		{ID: "s1", Description: "sweep configs", Status: "completed", OutputBytes: 128, Duration: 2 * time.Second},
+		{ID: "s2", Description: "run tests", Status: "running"},
+	}}
+	m := newModel(ctrl, testCfg())
+	if _, ok := m.maybeSlash("/agents"); !ok {
+		t.Fatal("/agents not recognized")
+	}
+	got := m.View()
+	for _, want := range []string{"sweep configs", "run tests", "completed", "running"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("/agents missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestSlashAgentsEmpty(t *testing.T) {
+	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
+	if _, ok := m.maybeSlash("/agents"); !ok {
+		t.Fatal("/agents not recognized")
+	}
+	if got := m.View(); !strings.Contains(got, "no subagents") {
+		t.Fatalf("/agents empty missing message:\n%s", got)
 	}
 }
 

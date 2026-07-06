@@ -12,6 +12,7 @@ import (
 	"github.com/alanfokco/lathe/internal/mcpconfig"
 	"github.com/alanfokco/lathe/internal/session"
 	"github.com/alanfokco/lathe/internal/settings"
+	"github.com/alanfokco/lathe/internal/subagent"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -41,14 +42,15 @@ type fakeControl struct {
 	slConfig      *settings.StatusLineConfig
 	cwd, sid, tp  string
 	ctxSize       int
-	mcpServers    []mcpconfig.ServerInfo // M6c-5
-	sessions      []session.Summary      // M6c-5
-	toolNames     []string               // M6f
-	thinkingOn    bool                   // M7a
-	thinkingBud   int                    // M7a
-	thinkingCalls []string               // M7a: audit trail
-	effort        string                 // M7b
-	plan          bool                   // M7g
+	mcpServers    []mcpconfig.ServerInfo  // M6c-5
+	sessions      []session.Summary       // M6c-5
+	toolNames     []string                // M6f
+	thinkingOn    bool                    // M7a
+	thinkingBud   int                     // M7a
+	thinkingCalls []string                // M7a: audit trail
+	effort        string                  // M7b
+	plan          bool                    // M7g
+	subagents     []subagent.SubagentInfo // M7e
 }
 
 func (f *fakeControl) SetModel(name string) error {
@@ -80,12 +82,13 @@ func (f *fakeControl) SetThinking(enable bool, budget int) {
 	}
 	f.thinkingCalls = append(f.thinkingCalls, fmt.Sprintf("%v/%d", enable, budget))
 }
-func (f *fakeControl) Thinking() (bool, int)  { return f.thinkingOn, f.thinkingBud }
-func (f *fakeControl) SetEffort(level string) { f.effort = level }
-func (f *fakeControl) Effort() string         { return f.effort }
-func (f *fakeControl) EnterPlanMode()         { f.plan = true }
-func (f *fakeControl) ExitPlanMode()          { f.plan = false }
-func (f *fakeControl) IsPlanMode() bool       { return f.plan }
+func (f *fakeControl) Thinking() (bool, int)              { return f.thinkingOn, f.thinkingBud }
+func (f *fakeControl) SetEffort(level string)             { f.effort = level }
+func (f *fakeControl) Effort() string                     { return f.effort }
+func (f *fakeControl) EnterPlanMode()                     { f.plan = true }
+func (f *fakeControl) ExitPlanMode()                      { f.plan = false }
+func (f *fakeControl) IsPlanMode() bool                   { return f.plan }
+func (f *fakeControl) Subagents() []subagent.SubagentInfo { return f.subagents }
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 

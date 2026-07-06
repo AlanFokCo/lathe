@@ -17,6 +17,7 @@ import (
 	"github.com/alanfokco/lathe/internal/session"
 	"github.com/alanfokco/lathe/internal/settings"
 	"github.com/alanfokco/lathe/internal/statusline"
+	"github.com/alanfokco/lathe/internal/subagent"
 	"github.com/alanfokco/lathe/internal/tui/theme"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -45,6 +46,7 @@ type EngineControl interface {
 	EnterPlanMode()                      // M7g: /plan on
 	ExitPlanMode()                       // M7g: /plan off
 	IsPlanMode() bool                    // M7g: status line + slash report
+	Subagents() []subagent.SubagentInfo  // M7e: /agents
 }
 
 type modelState int
