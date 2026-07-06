@@ -152,6 +152,12 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 	// the current project. Ships builtin defaults for go/typescript/python.
 	tk.AddGroup("lsp", tool.LSPTool(tool.WithLSPRootDir(cwd)))
 
+	// M7d: WebFetch + NotebookEdit — not in NewEnhancedToolkit but ship for
+	// claude-code parity. WebFetch pulls a URL into context (per-tool timeout
+	// + SSRF guard built into agentscope); NotebookEdit does cell-level edits
+	// on Jupyter notebooks.
+	tk.AddGroup("extra", tool.WebFetchTool(), tool.NotebookEditTool())
+
 	skillsSection := ""
 	if len(skillsList) > 0 {
 		skillsSection = skill.FormatSkillInstructions(skillsList)

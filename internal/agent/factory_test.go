@@ -333,6 +333,29 @@ func TestEnginePlanModeIdempotent(t *testing.T) {
 	eng.ExitPlanMode() // no-op
 }
 
+// TestNewEngineRegistersExtraTools — M7d: WebFetch + NotebookEdit are not in
+// NewEnhancedToolkit and need explicit registration for claude-code parity
+// (WebFetch = fetch URLs into context; NotebookEdit = edit .ipynb cells).
+func TestNewEngineRegistersExtraTools(t *testing.T) {
+	home := t.TempDir()
+	work := filepath.Join(home, "proj")
+	mustMkdir(t, work)
+	t.Setenv("HOME", home)
+	t.Chdir(work)
+
+	cfg := &config.Config{Provider: "openai", Model: "gpt-4o", APIKey: "k", Permission: "bypass", MaxIters: 10}
+	eng, err := NewEngine(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+	for _, name := range []string{"WebFetch", "NotebookEdit"} {
+		if eng.toolkit.Get(name) == nil {
+			t.Fatalf("toolkit missing %q", name)
+		}
+	}
+}
+
 // TestNewEngineRegistersLSPTool — M7c: LSPTool is exposed under group "lsp"
 // with cwd as the LSP root, giving the model semantic navigation (definitions,
 // references, hover, symbols) via gopls/tsserver/pylsp. The tool itself is
