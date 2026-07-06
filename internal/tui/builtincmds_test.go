@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/alanfokco/lathe/internal/config"
+	"github.com/alanfokco/lathe/internal/mcpconfig"
 )
 
 func TestCostText(t *testing.T) {
@@ -30,6 +31,31 @@ func TestDoctorText(t *testing.T) {
 	}
 	if strings.Contains(got, "secret123") {
 		t.Fatalf("doctorText leaked the api key:\n%s", got)
+	}
+}
+
+// TestDoctorTextIncludesAgentscopeVersionAndMCP — M9a: /doctor should surface
+// the linked agentscope-go version (from debug.ReadBuildInfo) and a live MCP
+// server count so users can audit their runtime.
+func TestDoctorTextIncludesAgentscopeVersionAndMCP(t *testing.T) {
+	ctrl := &fakeControl{
+		model: "gpt-4o",
+		mcpServers: []mcpconfig.ServerInfo{
+			{Name: "linear", ToolCount: 5},
+			{Name: "github", ToolCount: 12},
+		},
+		jailed:        true,
+		agentscopeVer: "v2.1.0-mock",
+	}
+	m := newModel(ctrl, &config.Config{
+		Provider: "openai", Model: "gpt-4o", APIKey: "sk-x",
+		Permission: "accept_edits",
+	})
+	got := m.doctorText()
+	for _, want := range []string{"agentscope:", "v2.1.0-mock", "mcp:", "2 server", "jail:", "on"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("/doctor missing %q:\n%s", want, got)
+		}
 	}
 }
 

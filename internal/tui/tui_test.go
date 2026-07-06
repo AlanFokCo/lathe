@@ -56,6 +56,7 @@ type fakeControl struct {
 	sandboxMode   string                        // M7f
 	skills        []skill.Skill                 // M8c
 	hooks         map[string][]settings.Matcher // M8c
+	agentscopeVer string                        // M9a
 }
 
 func (f *fakeControl) SetModel(name string) error {
@@ -103,6 +104,7 @@ func (f *fakeControl) SandboxMode() string {
 }
 func (f *fakeControl) SkillsList() []skill.Skill                { return f.skills }
 func (f *fakeControl) HooksList() map[string][]settings.Matcher { return f.hooks }
+func (f *fakeControl) AgentscopeVersion() string                { return f.agentscopeVer }
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 

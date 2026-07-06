@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alanfokco/lathe/internal/mcpconfig"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -23,7 +24,9 @@ func (m *model) costText() string {
 }
 
 // doctorText reports a quick diagnostic of the resolved config + environment
-// (M6c-4). Marks required fields with ✓/✗; the rest are informational.
+// (M6c-4). Marks required fields with ✓/✗; the rest are informational. M9a
+// extends with agentscope build version, jail state, and MCP server count so
+// users can audit the runtime at a glance.
 func (m *model) doctorText() string {
 	mark := func(ok bool) string {
 		if ok {
@@ -31,10 +34,7 @@ func (m *model) doctorText() string {
 		}
 		return "✗"
 	}
-	sandbox := m.cfg.Sandbox
-	if sandbox == "" {
-		sandbox = "host"
-	}
+	sandbox := m.engine.SandboxMode()
 	var b strings.Builder
 	b.WriteString("doctor:\n")
 	b.WriteString(fmt.Sprintf("  %s provider:   %s\n", mark(m.cfg.Provider != ""), m.cfg.Provider))
@@ -42,12 +42,36 @@ func (m *model) doctorText() string {
 	b.WriteString(fmt.Sprintf("  %s api key:    %s\n", mark(m.cfg.APIKey != ""), redactKey(m.cfg.APIKey)))
 	b.WriteString(fmt.Sprintf("  · permission: %s\n", m.cfg.Permission))
 	b.WriteString(fmt.Sprintf("  · sandbox:    %s\n", sandbox))
+	b.WriteString(fmt.Sprintf("  · jail:       %s\n", onOff(m.engine.Jailed())))
 	b.WriteString(fmt.Sprintf("  · theme:      %s\n", curTheme.Name))
 	b.WriteString(fmt.Sprintf("  · context:    %d tokens\n", m.ctxSize))
+	if v := m.engine.AgentscopeVersion(); v != "" {
+		b.WriteString(fmt.Sprintf("  · agentscope: %s\n", v))
+	}
+	if mcps := m.engine.MCPServers(); len(mcps) > 0 {
+		b.WriteString(fmt.Sprintf("  · mcp:        %d server(s), %d tool(s)\n", len(mcps), mcpToolCount(mcps)))
+	} else {
+		b.WriteString("  · mcp:        none\n")
+	}
 	if m.cwd != "" {
 		b.WriteString(fmt.Sprintf("  · cwd:        %s\n", m.cwd))
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func onOff(b bool) string {
+	if b {
+		return "on"
+	}
+	return "off"
+}
+
+func mcpToolCount(servers []mcpconfig.ServerInfo) int {
+	total := 0
+	for _, s := range servers {
+		total += s.ToolCount
+	}
+	return total
 }
 
 // claudeMDTemplate is the starter CLAUDE.md written by /init.

@@ -52,6 +52,7 @@ type EngineControl interface {
 	SandboxMode() string                      // M7f: /sandbox
 	SkillsList() []skill.Skill                // M8c: /skills
 	HooksList() map[string][]settings.Matcher // M8c: /hooks
+	AgentscopeVersion() string                // M9a: /doctor
 }
 
 type modelState int

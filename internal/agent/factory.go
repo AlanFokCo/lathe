@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -433,6 +435,32 @@ func (e *Engine) HooksList() map[string][]settings.Matcher {
 		return nil
 	}
 	return e.settings.Hooks
+}
+
+// AgentscopeVersion returns the agentscope-go dependency version as reported
+// by debug.ReadBuildInfo (M9a). Best-effort: returns "unknown" when build info
+// is unavailable (e.g. under `go run` without module info) or when the module
+// path is not in the dependency graph. Used by /doctor.
+func (e *Engine) AgentscopeVersion() string { return agentscopeVersion() }
+
+// agentscopeVersion is a package-level helper so tests can call it directly.
+func agentscopeVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	for _, d := range info.Deps {
+		if d == nil {
+			continue
+		}
+		if strings.HasPrefix(d.Path, "github.com/alanfokco/agentscope-go") {
+			if d.Replace != nil {
+				return d.Replace.Version + " (replaced)"
+			}
+			return d.Version
+		}
+	}
+	return "unknown"
 }
 
 // ListModels returns model names available for the current provider.
