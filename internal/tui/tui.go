@@ -148,7 +148,28 @@ func (m *model) wrapWidth() int {
 
 func (m *model) Init() tea.Cmd {
 	setTitle("lathe · " + m.engine.ModelName())
+	m.input.Placeholder = "How can I help you?"
+	m.showWelcome()
 	return tea.Batch(m.input.Focus(), m.scheduleStatusLine())
+}
+
+// showWelcome renders the startup banner into the scrollback (M13).
+func (m *model) showWelcome() {
+	var b strings.Builder
+	b.WriteString(promptStyle.Render("█ lathe") + dimStyle.Render(" v0.1") + "\n")
+	b.WriteString(dimStyle.Render("  model: ") + m.engine.ModelName() + "\n")
+	if m.cwd != "" {
+		b.WriteString(dimStyle.Render("  cwd:   ") + m.cwd + "\n")
+	}
+	if branch, dirty, ok := m.engine.GitInfo(); ok {
+		label := branch
+		if dirty {
+			label += "*"
+		}
+		b.WriteString(dimStyle.Render("  git:   ") + label + "\n")
+	}
+	b.WriteString(dimStyle.Render("\n  Type a message or /help for commands.\n"))
+	m.sb.appendBanner(b.String())
 }
 
 // submit starts a turn: appends the user prompt (as typed, for the scrollback)
@@ -851,7 +872,19 @@ func (m *model) statusLine() string {
 	}
 	// M10c: permission mode indicator (M7g PLAN marker subsumed here)
 	parts = append(parts, permModeLabel(m.engine.PermissionMode(), m.engine.IsPlanMode()))
-	line := strings.Join(parts, " · ")
+	// M13: styled status segments.
+	var styled []string
+	for i, p := range parts {
+		switch {
+		case i == 0:
+			styled = append(styled, promptStyle.Render(p))
+		case i == len(parts)-1:
+			styled = append(styled, okStyle.Render(p))
+		default:
+			styled = append(styled, dimStyle.Render(p))
+		}
+	}
+	line := strings.Join(styled, dimStyle.Render(" · "))
 	setTitle("lathe · " + m.engine.ModelName())
 	return line
 }
@@ -956,7 +989,8 @@ func (m *model) View() string {
 	if m.vimNormal {
 		vimTag = warnStyle.Render("NORMAL") + " "
 	}
-	bottom := m.statusLine() + "\n" + vimTag + promptStyle.Render("> ") + m.input.View()
+	rule := dimStyle.Render(strings.Repeat("─", m.wrapWidth()))
+	bottom := rule + "\n" + m.statusLine() + "\n" + vimTag + promptStyle.Render("❯ ") + m.input.View()
 	if m.state == stateAwaitingApproval {
 		return m.viewport.View() + "\n" + m.approvalBar() + "\n" + bottom
 	}

@@ -16,6 +16,7 @@ const (
 	kindTool
 	kindError
 	kindThinking // M7a: extended-thinking output (dim italic, no glamour)
+	kindBanner   // M13: welcome/system banner (pre-rendered, no glamour)
 )
 
 // block is one scrollback entry. M5d upgrades the assistant streaming fields
@@ -127,6 +128,12 @@ func (s *scrollback) appendError(err error) {
 	s.lastAssistant = -1
 }
 
+// appendBanner adds a pre-rendered banner block (M13).
+func (s *scrollback) appendBanner(text string) {
+	s.blocks = append(s.blocks, block{kind: kindBanner, text: text})
+	s.lastAssistant = -1
+}
+
 func (s *scrollback) clear() { s.blocks = nil; s.lastAssistant = 0 }
 
 // invalidateRenders forces assistant blocks to re-run glamour on the next build
@@ -194,6 +201,8 @@ func (s *scrollback) build(width, selectedTool int) string {
 			body = errorStyle.Render("\nerror: " + bl.text + "\n")
 		case kindThinking:
 			body = renderThinking(bl.text, width)
+		case kindBanner:
+			body = bl.text
 		}
 		b.WriteString(body)
 		line += strings.Count(body, "\n")
