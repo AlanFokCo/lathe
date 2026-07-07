@@ -58,6 +58,7 @@ type EngineControl interface {
 	SkillsList() []skill.Skill                // M8c: /skills
 	HooksList() map[string][]settings.Matcher // M8c: /hooks
 	AgentscopeVersion() string                // M9a: /doctor
+	GitInfo() (string, bool, bool)            // M11c: git branch in status line
 }
 
 type modelState int
@@ -820,6 +821,13 @@ func (m *model) statusLine() string {
 		return m.statusLineText
 	}
 	parts := []string{m.engine.ModelName()}
+	if branch, dirty, ok := m.engine.GitInfo(); ok {
+		label := branch
+		if dirty {
+			label += "*"
+		}
+		parts = append(parts, label)
+	}
 	if m.cwd != "" {
 		parts = append(parts, m.cwd)
 	}

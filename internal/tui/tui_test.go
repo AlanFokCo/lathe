@@ -58,6 +58,8 @@ type fakeControl struct {
 	skills        []skill.Skill                 // M8c
 	hooks         map[string][]settings.Matcher // M8c
 	agentscopeVer string                        // M9a
+	gitBranch     string                        // M11c
+	gitDirty      bool                          // M11c
 }
 
 func (f *fakeControl) SetModel(name string) error {
@@ -114,6 +116,9 @@ func (f *fakeControl) SandboxMode() string {
 func (f *fakeControl) SkillsList() []skill.Skill                { return f.skills }
 func (f *fakeControl) HooksList() map[string][]settings.Matcher { return f.hooks }
 func (f *fakeControl) AgentscopeVersion() string                { return f.agentscopeVer }
+func (f *fakeControl) GitInfo() (string, bool, bool) {
+	return f.gitBranch, f.gitDirty, f.gitBranch != ""
+}
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 
@@ -1190,5 +1195,31 @@ func TestMouseWheelScrollsViewport(t *testing.T) {
 	mm := tm.(*model)
 	if mm.viewport.YOffset >= before {
 		t.Fatalf("expected YOffset to decrease after wheel-up: before=%d after=%d", before, mm.viewport.YOffset)
+	}
+}
+
+// ── M11c tests ──────────────────────────────────────────────────────────
+
+func TestStatusLineShowsGitBranch(t *testing.T) {
+	fc := &fakeControl{model: "gpt-4o", gitBranch: "feat/cool", gitDirty: true}
+	m := newModel(fc, testCfg())
+	m.width = 120
+	m.height = 24
+	m.rebuild()
+	sl := m.statusLine()
+	if !strings.Contains(sl, "feat/cool*") {
+		t.Fatalf("expected git branch with dirty marker in status line, got: %s", sl)
+	}
+}
+
+func TestStatusLineNoGitBranch(t *testing.T) {
+	fc := &fakeControl{model: "gpt-4o"}
+	m := newModel(fc, testCfg())
+	m.width = 120
+	m.height = 24
+	m.rebuild()
+	sl := m.statusLine()
+	if strings.Contains(sl, "feat/") {
+		t.Fatalf("expected no git branch in status line, got: %s", sl)
 	}
 }

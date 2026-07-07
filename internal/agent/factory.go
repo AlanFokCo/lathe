@@ -516,6 +516,11 @@ func (e *Engine) StatusInfo() (cwd, sessionID, transcriptPath string, contextSiz
 	return
 }
 
+// GitInfo returns the current git branch and dirty state. M11c.
+func (e *Engine) GitInfo() (branch string, dirty bool, ok bool) {
+	return gitInfo(e.cwd)
+}
+
 // StatusLineConfig returns the parsed statusLine setting, or nil if unset (M5b).
 func (e *Engine) StatusLineConfig() *settings.StatusLineConfig {
 	if e.settings == nil {
