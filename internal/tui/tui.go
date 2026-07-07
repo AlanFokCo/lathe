@@ -326,6 +326,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		// M6h: rebuild() invokes applyLayout() which now factors in the todo pane.
+		m.input.SetWidth(msg.Width)
 		m.rebuild()
 		return m, nil
 	case tea.KeyMsg:
@@ -523,6 +524,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch {
+		case msg.Type == tea.KeyCtrlL && m.state == stateIdle:
+			m.sb.clear()
+			m.rebuild()
+			return m, nil
 		case msg.Type == tea.KeyCtrlC:
 			// M8b: Ctrl+C is contextual. While a turn is running it cancels
 			// the turn (same as Esc). While idle it needs a second press

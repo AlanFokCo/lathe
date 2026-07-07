@@ -1133,3 +1133,38 @@ func TestVimEscDuringRunningStillCancels(t *testing.T) {
 		t.Fatal("Esc during running should not enter vim normal mode")
 	}
 }
+
+// ── M11a tests ──────────────────────────────────────────────────────────
+
+func TestInputWidthFollowsResize(t *testing.T) {
+	fc := &fakeControl{model: "test"}
+	m := newModel(fc, testCfg())
+	m.width = 80
+	m.height = 24
+	var tm tea.Model = m
+	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	mm := tm.(*model)
+	if mm.input.Width() != 140 {
+		t.Fatalf("expected input width 140, got %d", mm.input.Width())
+	}
+}
+
+func TestCtrlLClearsScrollback(t *testing.T) {
+	fc := &fakeControl{model: "test"}
+	m := newModel(fc, testCfg())
+	m.width = 80
+	m.height = 24
+	m.sb.appendUser("hello world")
+	m.rebuild()
+	v := m.View()
+	if !strings.Contains(v, "hello world") {
+		t.Fatal("expected scrollback content before Ctrl+L")
+	}
+	var tm tea.Model = m
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	mm := tm.(*model)
+	v = mm.View()
+	if strings.Contains(v, "hello world") {
+		t.Fatal("scrollback should be cleared after Ctrl+L")
+	}
+}
