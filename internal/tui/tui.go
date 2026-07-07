@@ -168,8 +168,9 @@ func (m *model) showWelcome() {
 		}
 		b.WriteString(dimStyle.Render("  git:   ") + label + "\n")
 	}
-	b.WriteString(dimStyle.Render("\n  Type a message or /help for commands.\n"))
+	b.WriteString(dimStyle.Render("\n  Tips: type a message, or /help for commands.\n"))
 	m.sb.appendBanner(b.String())
+	m.rebuild()
 }
 
 // submit starts a turn: appends the user prompt (as typed, for the scrollback)
@@ -207,13 +208,13 @@ func (m *model) rebuild() {
 }
 
 // applyLayout resizes the viewport based on current terminal dims minus the
-// three pinned lines (activity + status + input) minus the todo pane height.
+// four pinned lines (activity + rule + input + status) minus the todo pane height.
 // M6h. No-op before the first WindowSizeMsg (width/height=0).
 func (m *model) applyLayout() {
 	if m.width <= 0 || m.height <= 0 {
 		return
 	}
-	h := m.height - 3 - m.todoPaneHeight()
+	h := m.height - 4 - m.todoPaneHeight()
 	if h < 1 {
 		h = 1
 	}
@@ -990,7 +991,7 @@ func (m *model) View() string {
 		vimTag = warnStyle.Render("NORMAL") + " "
 	}
 	rule := dimStyle.Render(strings.Repeat("─", m.wrapWidth()))
-	bottom := rule + "\n" + m.statusLine() + "\n" + vimTag + promptStyle.Render("❯ ") + m.input.View()
+	bottom := rule + "\n" + vimTag + promptStyle.Render("❯ ") + m.input.View() + "\n" + m.statusLine()
 	if m.state == stateAwaitingApproval {
 		return m.viewport.View() + "\n" + m.approvalBar() + "\n" + bottom
 	}
