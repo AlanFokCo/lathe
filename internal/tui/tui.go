@@ -145,7 +145,10 @@ func (m *model) wrapWidth() int {
 	return 80
 }
 
-func (m *model) Init() tea.Cmd { return tea.Batch(m.input.Focus(), m.scheduleStatusLine()) }
+func (m *model) Init() tea.Cmd {
+	setTitle("lathe · " + m.engine.ModelName())
+	return tea.Batch(m.input.Focus(), m.scheduleStatusLine())
+}
 
 // submit starts a turn: appends the user prompt (as typed, for the scrollback)
 // and dispatches the expanded prompt (M7d.1 @file expansion applied) to the
@@ -841,7 +844,9 @@ func (m *model) statusLine() string {
 	}
 	// M10c: permission mode indicator (M7g PLAN marker subsumed here)
 	parts = append(parts, permModeLabel(m.engine.PermissionMode(), m.engine.IsPlanMode()))
-	return strings.Join(parts, " · ")
+	line := strings.Join(parts, " · ")
+	setTitle("lathe · " + m.engine.ModelName())
+	return line
 }
 
 // activityLine returns the live progress line shown while a turn runs:
@@ -1169,4 +1174,14 @@ func oscCopy(text string) {
 // terminals that do not support OSC-9.
 func notifyTurnDone() {
 	fmt.Fprint(os.Stderr, "\x1b]9;lathe: turn done\x07\a")
+}
+
+// setTitle sets the terminal tab/window title via OSC 0 (M11d).
+func setTitle(title string) {
+	fmt.Fprintf(os.Stderr, "\x1b]0;%s\x07", title)
+}
+
+// titleOSC returns the raw OSC-0 title-set sequence (M11d, testable).
+func titleOSC(title string) string {
+	return fmt.Sprintf("\x1b]0;%s\x07", title)
 }

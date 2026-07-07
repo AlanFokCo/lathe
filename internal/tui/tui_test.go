@@ -1223,3 +1223,13 @@ func TestStatusLineNoGitBranch(t *testing.T) {
 		t.Fatalf("expected no git branch in status line, got: %s", sl)
 	}
 }
+
+// ── M11d tests ──────────────────────────────────────────────────────────
+
+func TestTitleOSCFormat(t *testing.T) {
+	got := titleOSC("lathe · gpt-4o")
+	want := "\x1b]0;lathe · gpt-4o\x07"
+	if got != want {
+		t.Fatalf("titleOSC mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
