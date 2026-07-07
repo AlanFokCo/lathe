@@ -1168,3 +1168,27 @@ func TestCtrlLClearsScrollback(t *testing.T) {
 		t.Fatal("scrollback should be cleared after Ctrl+L")
 	}
 }
+
+// ── M11b tests ──────────────────────────────────────────────────────────
+
+func TestMouseWheelScrollsViewport(t *testing.T) {
+	fc := &fakeControl{model: "test"}
+	m := newModel(fc, testCfg())
+	m.width = 80
+	m.height = 10
+	// Fill scrollback with enough lines to make it scrollable.
+	var lines []string
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	m.sb.appendUser(strings.Join(lines, "\n"))
+	m.rebuild()
+	// Viewport should be at the bottom after rebuild; scroll up.
+	before := m.viewport.YOffset
+	var tm tea.Model = m
+	tm, _ = tm.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	mm := tm.(*model)
+	if mm.viewport.YOffset >= before {
+		t.Fatalf("expected YOffset to decrease after wheel-up: before=%d after=%d", before, mm.viewport.YOffset)
+	}
+}

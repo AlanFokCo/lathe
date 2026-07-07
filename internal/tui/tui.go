@@ -329,6 +329,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input.SetWidth(msg.Width)
 		m.rebuild()
 		return m, nil
+	case tea.MouseMsg:
+		// M11b: forward mouse events (wheel scroll) to the viewport.
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
 	case tea.KeyMsg:
 		if m.state == stateAwaitingApproval {
 			switch {
