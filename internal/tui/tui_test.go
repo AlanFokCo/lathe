@@ -14,6 +14,7 @@ import (
 	"github.com/alanfokco/lathe/internal/session"
 	"github.com/alanfokco/lathe/internal/settings"
 	"github.com/alanfokco/lathe/internal/subagent"
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -1231,5 +1232,40 @@ func TestTitleOSCFormat(t *testing.T) {
 	want := "\x1b]0;lathe · gpt-4o\x07"
 	if got != want {
 		t.Fatalf("titleOSC mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// -- M11e tests --
+
+func TestVimCursorModeChanges(t *testing.T) {
+	fc := &fakeControl{model: "test"}
+	m := newModel(fc, testCfg())
+	m.width = 80
+	m.height = 24
+
+	// Default should be blink
+	if m.input.Cursor.Mode() != cursor.CursorBlink {
+		t.Fatalf("expected initial cursor mode CursorBlink, got %v", m.input.Cursor.Mode())
+	}
+
+	// Esc -> normal mode -> cursor should be static
+	var tm tea.Model = m
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = tm.(*model)
+	if !m.vimNormal {
+		t.Fatal("expected vim normal mode after Esc")
+	}
+	if m.input.Cursor.Mode() != cursor.CursorStatic {
+		t.Fatalf("expected CursorStatic in normal mode, got %v", m.input.Cursor.Mode())
+	}
+
+	// i -> insert mode -> cursor should be blink
+	tm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = tm.(*model)
+	if m.vimNormal {
+		t.Fatal("expected insert mode after i")
+	}
+	if m.input.Cursor.Mode() != cursor.CursorBlink {
+		t.Fatalf("expected CursorBlink in insert mode, got %v", m.input.Cursor.Mode())
 	}
 }

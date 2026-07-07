@@ -22,6 +22,7 @@ import (
 	"github.com/alanfokco/lathe/internal/statusline"
 	"github.com/alanfokco/lathe/internal/subagent"
 	"github.com/alanfokco/lathe/internal/tui/theme"
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -576,11 +577,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// M10i: Esc when idle -> enter vim normal mode
 		if m.state == stateIdle && msg.Type == tea.KeyEscape {
 			m.vimNormal = true
-			return m, nil
+			cmd := m.input.Cursor.SetMode(cursor.CursorStatic)
+			return m, cmd
 		}
 		// M10i: vim normal mode -- handle motion/edit keys, block runes from textarea
 		if m.vimNormal && m.state == stateIdle && msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+			wasNormal := m.vimNormal
 			m.handleVimNormal(msg.Runes[0])
+			if wasNormal && !m.vimNormal {
+				cmd := m.input.Cursor.SetMode(cursor.CursorBlink)
+				return m, cmd
+			}
 			return m, nil
 		}
 		var c tea.Cmd
