@@ -2,6 +2,7 @@ package agent
 
 import (
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/protocol"
+	"github.com/sirupsen/logrus"
 )
 
 // persistHook is a loop.Hook that flushes new agent state.Context messages to
@@ -26,7 +27,9 @@ func (h *persistHook) OnLoopEnd(_ error) {
 		return
 	}
 	for i := h.saved; i < len(st.Context); i++ {
-		_ = s.Save(st.Context[i])
+		if err := s.Save(st.Context[i]); err != nil {
+			logrus.WithError(err).Warn("session: failed to persist message")
+		}
 	}
 	h.saved = len(st.Context)
 }

@@ -122,7 +122,7 @@ func globTool(ws workspace.Workspace) tool.Tool {
 			if pattern == "" {
 				return nil, fmt.Errorf("pattern is required")
 			}
-			cmd := fmt.Sprintf("find %s -type f -name '%s'", ws.BasePath(), shellQuote(pattern))
+			cmd := fmt.Sprintf("find '%s' -type f -name '%s'", shellQuote(ws.BasePath()), shellQuote(pattern))
 			res, err := ws.Execute(ctx, cmd)
 			if err != nil {
 				return nil, err

@@ -266,7 +266,15 @@ func pumpModel(t *testing.T, m *model, cmd tea.Cmd) {
 func TestModelSlashCompact(t *testing.T) {
 	ctrl := &fakeControl{model: "gpt-4o"}
 	m := newModel(ctrl, testCfg())
-	m.maybeSlash("/compact")
+	cmd, ok := m.maybeSlash("/compact")
+	if !ok {
+		t.Fatal("expected /compact to be recognized")
+	}
+	// /compact is async — execute the returned tea.Cmd and feed the result back.
+	if cmd != nil {
+		msg := cmd()
+		m.Update(msg)
+	}
 	if ctrl.compressCalls != 1 {
 		t.Fatalf("CompressNow calls: %d", ctrl.compressCalls)
 	}
@@ -530,8 +538,8 @@ func TestFormatTickRebuildsWhileRunning(t *testing.T) {
 func TestWindowSizeMsgSetsViewportHeight(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	if m.height != 40 || m.viewport.Width != 120 || m.viewport.Height != 37 {
-		t.Fatalf("resize: height=%d vp=%dx%d (want 40, 120x37)", m.height, m.viewport.Width, m.viewport.Height)
+	if m.height != 40 || m.viewport.Width != 120 || m.viewport.Height != 36 {
+		t.Fatalf("resize: height=%d vp=%dx%d (want 40, 120x36)", m.height, m.viewport.Width, m.viewport.Height)
 	}
 }
 

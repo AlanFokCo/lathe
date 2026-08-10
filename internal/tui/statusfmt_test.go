@@ -59,6 +59,7 @@ func TestActivityLineShowsElapsedAndThroughput(t *testing.T) {
 	m.state = stateRunning
 	m.turnStart = time.Now().Add(-90 * time.Second)
 	m.cumOut = 300
+	m.turnOut = 300
 	got := m.activityLine()
 	if !strings.Contains(got, "1m") || !strings.Contains(got, "tok/s") {
 		t.Fatalf("activity line missing elapsed/throughput:\n%s", got)

@@ -130,6 +130,14 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 			return nil, fmt.Errorf("sandbox: %w", werr)
 		}
 		tk = workspace.WorkspaceToolkit(ws)
+		// Re-add skills + MCP tools that were discovered above so they
+		// survive the toolkit swap (sandbox only replaces builtins).
+		if len(skillsList) > 0 {
+			tk.AddGroup("skills", skill.NewSkillViewerTool(skillsList))
+		}
+		for _, g := range mcpGroups {
+			tk.AddGroup("mcp:"+g.Name, g.Tools...)
+		}
 		workspaceCloser = closer
 		subToolkit = workspace.WorkspaceToolkit(ws)
 	} else {
@@ -222,8 +230,17 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 
 // assembleAgent builds (or rebuilds) the UnifiedAgent from the Engine's fields.
 // Called once at construction; SetModel re-invokes it to swap the model while
-// preserving state.Context (passed back via WithState).
+// preserving state.Context (passed back via WithState). It also rebuilds the
+// TaskTool so the subagent uses the current chatModel (not a stale capture).
 func (e *Engine) assembleAgent() {
+	// Rebuild the TaskTool with the current chatModel so SetModel propagates.
+	// AddGroup replaces an existing group of the same name, so this is safe to
+	// call on every rebuild.
+	if e.toolkit != nil && e.subagents != nil {
+		subTk := tool.NewEnhancedToolkit()
+		e.toolkit.AddGroup("task", NewTaskToolWithTracker(e.chatModel, e.permEng, e.maxIters, subTk, e.subagents))
+	}
+
 	opts := []asagent.AgentOption{
 		asagent.WithToolkit(e.toolkit),
 		asagent.WithReadCache(e.readCache),

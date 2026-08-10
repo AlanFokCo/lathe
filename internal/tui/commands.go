@@ -25,13 +25,15 @@ func commands() []command {
 		{name: "help", desc: "list commands", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(helpText()); return nil }},
 		{name: "clear", desc: "clear the scrollback", run: func(m *model, _ string) tea.Cmd { m.sb.clear(); m.rebuild(); return nil }},
 		{name: "compact", desc: "summarize + compress the conversation", run: func(m *model, _ string) tea.Cmd {
-			msg, err := m.engine.CompressNow(context.Background())
-			if err != nil {
-				m.sbAppendUser("/compact: " + err.Error())
-			} else {
-				m.sbAppendUser("/compact: " + msg)
+			m.sbAppendUser("/compact: compressing...")
+			engine := m.engine
+			return func() tea.Msg {
+				msg, err := engine.CompressNow(context.Background())
+				if err != nil {
+					return compactDoneMsg{err: err}
+				}
+				return compactDoneMsg{result: msg}
 			}
-			return nil
 		}},
 		{name: "model", desc: "show or switch the model", run: func(m *model, rest string) tea.Cmd { return m.handleModel(rest) },
 			argsFn: func(m *model) []string { return m.engine.ListModels() }},

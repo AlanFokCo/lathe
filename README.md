@@ -17,8 +17,17 @@ covered by hermetic tests:
 - **M4** skills / MCP / hooks / Task subagent / sandbox
 - **M5a** Ollama provider · **M5b** configurable status line
 
-Not yet released; `agentscope-go` is currently consumed from a local checkout
-(see [Build & run](#build--run)).
+Uses `agentscope-go` v2.0.6 as a remote module dependency (fetched from the Go
+module proxy — no local checkout required).
+
+## Requirements
+
+- **Go 1.25+** (module declares `go 1.26.3`; 1.25 is sufficient to build)
+- At least one LLM provider credential:
+  - `ANTHROPIC_API_KEY` — Anthropic (default)
+  - `OPENAI_API_KEY` — OpenAI
+  - `DASHSCOPE_API_KEY` — DashScope / Qwen
+  - Or `--provider ollama` for local models (no key needed)
 
 ## Features
 
@@ -36,43 +45,49 @@ Not yet released; `agentscope-go` is currently consumed from a local checkout
   interactive approval in the TUI; `always` upgrades a tool to auto-allow.
 - **Optional sandbox** — `--sandbox docker` (container mounting cwd) or `e2b`
   (cloud); sandbox setup failure fails loudly — no silent fallback to host.
+  Skills and MCP tools are preserved when switching to the sandbox toolkit.
 - **Sessions** — JSONL transcripts under `~/.lathe/projects/<enc-cwd>/<id>.jsonl`
-  (claude-code-style project dirs); `--resume <id>` / `--continue`.
-- **Auto-compact** — conversation summarized past `0.8 × context_size` (a
+  (claude-code-style project dirs); `--resume <id>` / `--continue`. Save
+  failures are logged as warnings (no silent data loss).
+- **Auto-compact & `/compact`** — conversation summarized past `0.8 × context_size` (a
   `0.1 × ctx` tail reserved, tool_call/result pairs kept together); `/compact`
-  to force.
+  runs asynchronously with progress feedback (no TUI freeze).
+- **Context compression** — structured summary (`task_overview`, `current_state`,
+  `important_discoveries`, `next_steps`, `context_to_preserve`) replaces old
+  prefix messages when the context window fills up.
+- **Thinking modes** — supports model thinking/reasoning when available.
+- **Vim mode** — vim-style cursor (block in normal, bar in insert) for the
+  input area.
+- **`@file` references** — mention `@path/to/file` in prompts to inject file
+  contents into the conversation.
 - **Skills** — `SKILL.md` instruction docs discovered from `~/.lathe/skills` +
   project `.lathe/skills` (walked cwd→repo-root); exposed via a read-only
   `Skill` tool.
-- **MCP** — `.mcp.json` `stdio`/`http` servers become ordinary toolkit tools.
+- **MCP integration** — `.mcp.json` `stdio`/`http` servers become ordinary toolkit tools.
 - **Hooks** — `settings.json` shell-command hooks at `UserPromptSubmit` /
   `PreToolUse` / `PostToolUse` / `Stop`; a hook may block a tool or inject
   context. Failures are non-blocking.
 - **Task subagent** — a `Task` tool that spawns a nested builtins-only engine
   (no `Task` → no recursion), sharing the parent's model + permission engine.
+  `/model` propagates to the subagent (TaskTool is rebuilt on model change).
 - **Configurable status line** — a `statusLine` shell command in `settings.json`
   receives a Claude-Code-compatible JSON snapshot on stdin and its stdout
   becomes the TUI status line; falls back to the built-in `model | perm | tokens`
   line when unconfigured.
+- **Per-turn tok/s** — the activity line shows throughput for the current turn
+  (not cumulative across turns).
 
 ## Build & run
 
-> **Prerequisite:** lathe currently resolves `agentscope-go` from a **local
-> sibling checkout**. Clone [agentscope-go](https://github.com/alanfokco/agentscope-go)
-> at `../agentscope-go` (next to this repo) before building. The `replace`
-> directive in `go.mod` will be dropped in favor of
-> `go get github.com/alanfokco/agentscope-go@v2.0.3` once agentscope-go is
-> published.
-
 ```bash
 git clone https://github.com/AlanFokCo/lathe.git && cd lathe
-git clone https://github.com/alanfokco/agentscope-go.git ../agentscope-go
 go build -o lathe ./cmd/lathe
 ```
 
 - Build all packages: `go build ./...`
 - Test (hermetic — uses a fake model, **no API key needed**): `go test ./...`
 - Vet: `go vet ./...`
+- Lint: `golangci-lint run ./...`
 - Run TUI: `./lathe` (or `go run ./cmd/lathe`)
 - Print mode: `./lathe -p "your prompt"` (`--output stream-json` for NDJSON)
 
@@ -106,6 +121,9 @@ lathe reads (project `<cwd>/.lathe/` overrides user `~/.lathe/`):
 
 - **`settings.json`** — `hooks` (PreToolUse/PostToolUse/UserPromptSubmit/Stop)
   and `statusLine` (`{ "type": "command", "command": "...", "padding": N }`).
+- **`config.toml`** — TOML config for provider/model/permission defaults
+  (flag > env > TOML > defaults). Override path with `--config`; `--config none`
+  skips TOML loading.
 - **`.mcp.json`** — MCP servers (`stdio` / `http`; `sse` unsupported).
 - **`skills/<name>/SKILL.md`** — instruction docs surfaced to the model.
 - **`CLAUDE.md` / `AGENTS.md`** — project memory injected into the system
@@ -150,7 +168,7 @@ Example `~/.lathe/settings.json` with a status line:
 cmd/lathe/         cobra entrypoint
 internal/agent/    turn engine, factory, dispatch, compress, task tool, sysprompt, memory
 internal/cli/      print mode
-internal/config/   flag > env > defaults resolution
+internal/config/   flag > env > TOML > defaults resolution
 internal/event/    Event interface (engine → consumer seam)
 internal/hooks/    shell-command hook runner
 internal/mcpconfig/ .mcp.json parsing + MCP clients
@@ -167,7 +185,7 @@ internal/workspace/ docker/e2b sandbox + workspace-backed tools
 
 - Code comments are tagged with milestone markers (`M2`, `M4c`, `M5a`, …) from
   local design docs.
-- Config resolution order is **flag > env > defaults** (`internal/config`) —
+- Config resolution order is **flag > env > TOML > defaults** (`internal/config`) —
   wire new options through `config.Flags` / `config.Config` + `Load` rather than
   reading env ad hoc.
 - New turn-level signals go in `internal/event`; new tools go through the

@@ -89,6 +89,7 @@ type model struct {
 	eventCh        <-chan asevent.Event
 	cumIn          int
 	cumOut         int
+	turnOut        int
 	pendingTool    string
 	pendingInput   string // M10d: raw JSON args of the pending tool call
 	statusLineText string
@@ -183,6 +184,7 @@ func (m *model) submit(prompt string) tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.ctx, m.cancel = ctx, cancel
 	m.state = stateRunning
+	m.turnOut = 0            // M6c: reset per-turn output tokens for tok/s
 	m.turnStart = time.Now() // M6c: for elapsed + tok/s in the activity line
 	m.eventCh = m.engine.Run(ctx, expanded)
 	return tea.Batch(waitForEvent(m.eventCh), m.spinner.Tick, scheduleFormatTick())
@@ -327,6 +329,12 @@ type eventMsg struct{ ev asevent.Event }
 
 // streamEndMsg is sent when the engine event channel closes.
 type streamEndMsg struct{}
+
+// compactDoneMsg carries the result of the async /compact operation.
+type compactDoneMsg struct {
+	result string
+	err    error
+}
 
 // formatTickMsg drives the throttled (120ms) scrollback rebuild while a turn
 // is running (M5d). Decouples token-stream rate from glamour rate so the
@@ -633,6 +641,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cancel = nil
 		m.phase = phaseIdle
 		return m, m.scheduleStatusLine()
+	case compactDoneMsg:
+		if msg.err != nil {
+			m.sbAppendUser("/compact: " + msg.err.Error())
+		} else {
+			m.sbAppendUser("/compact: " + msg.result)
+		}
+		return m, nil
 	case statusLineMsg:
 		if msg.gen == m.slGen {
 			m.statusLineText = msg.text
@@ -682,6 +697,7 @@ func (m *model) handleEvent(ev asevent.Event) {
 	case asevent.ModelCallEndEvent:
 		m.cumIn += e.InputTokens
 		m.cumOut += e.OutputTokens
+		m.turnOut += e.OutputTokens
 		m.lastIn = e.InputTokens // M6c: last request's input ≈ current context usage
 		m.cumCacheR += e.CacheReadTokens
 		m.cumCacheW += e.CacheCreationTokens
@@ -905,7 +921,7 @@ func (m *model) activityLine() string {
 	if !m.turnStart.IsZero() { // M6c: elapsed + throughput
 		d := time.Since(m.turnStart)
 		out += " · " + formatElapsed(d)
-		if tps := tokPerSec(m.cumOut, d); tps > 0 {
+		if tps := tokPerSec(m.turnOut, d); tps > 0 {
 			out += fmt.Sprintf(" · %d tok/s", tps)
 		}
 	}

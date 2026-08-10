@@ -54,6 +54,7 @@ type Config struct {
 
 // Flags holds CLI overrides; empty fields are unset.
 type Flags struct {
+	ConfigPath                                                                       string  // path to TOML config; "" = DefaultTOMLPath(); "none" = skip
 	Provider, Model, APIKey, BaseURL, Permission, Output, Prompt, Sandbox, Theme string
 	MaxIters                                                                     int
 	Resume                                                                       string
@@ -71,13 +72,20 @@ type Flags struct {
 // Load resolves a Config from flags + env + TOML + defaults (M9e). Resolution
 // order: flag > env > TOML (~/.lathe/config.toml) > defaults.
 func Load(f Flags) (*Config, error) {
-	// M9e: fill empty flag fields from ~/.lathe/config.toml first, so the
-	// downstream flag/env resolution still gets to override anything the
-	// user set explicitly.
-	if t, terr := LoadTOML(DefaultTOMLPath()); terr != nil {
-		return nil, terr
-	} else {
-		f = mergeTOMLIntoFlags(f, t)
+	// M9e: fill empty flag fields from TOML first, so the downstream
+	// flag/env resolution still gets to override anything the user set
+	// explicitly. ConfigPath overrides DefaultTOMLPath(); "none" or
+	// "/dev/null" skips TOML loading entirely (useful for tests).
+	tomlPath := f.ConfigPath
+	if tomlPath == "" {
+		tomlPath = DefaultTOMLPath()
+	}
+	if tomlPath != "none" && tomlPath != "/dev/null" {
+		if t, terr := LoadTOML(tomlPath); terr != nil {
+			return nil, terr
+		} else {
+			f = mergeTOMLIntoFlags(f, t)
+		}
 	}
 	cfg := &Config{
 		Permission:              "accept_edits",
