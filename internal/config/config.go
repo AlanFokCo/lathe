@@ -50,6 +50,9 @@ type Config struct {
 	CompactRatio            float64 // M9d: fraction of context that triggers auto-compact (0 = disabled)
 	ContextSize             int     // M9d: model context window override in tokens (0 = model-card default)
 	Notify                  bool    // M10f: OSC-9 notification + bell on turn end
+	MaxCostUSD              float64 // spend cap in USD; 0 = no limit
+	RecordTape              string  // path to record a replay tape
+	ReplayTape              string  // path to replay from a tape
 }
 
 // Flags holds CLI overrides; empty fields are unset.
@@ -67,6 +70,9 @@ type Flags struct {
 	CompactRatio                                                                 float64 // M9d: --compact-ratio
 	ContextSize                                                                  int     // M9d: --context-size
 	Notify                                                                       bool    // M10f: --notify
+	MaxCostUSD                                                                   float64 // --max-cost
+	RecordTape                                                                   string  // --record
+	ReplayTape                                                                   string  // --replay
 }
 
 // Load resolves a Config from flags + env + TOML + defaults (M9e). Resolution
@@ -169,6 +175,11 @@ func Load(f Flags) (*Config, error) {
 	if !cfg.Notify && envTruthy(os.Getenv("LATHE_NOTIFY")) {
 		cfg.Notify = true
 	}
+	// Spend cap: flag only (env could come later).
+	cfg.MaxCostUSD = f.MaxCostUSD
+	// Replay tape paths: flag only.
+	cfg.RecordTape = f.RecordTape
+	cfg.ReplayTape = f.ReplayTape
 
 	if f.Provider != "" {
 		cfg.Provider = f.Provider

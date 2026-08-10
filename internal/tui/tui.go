@@ -61,6 +61,8 @@ type EngineControl interface {
 	HooksList() map[string][]settings.Matcher // M8c: /hooks
 	AgentscopeVersion() string                // M9a: /doctor
 	GitInfo() (string, bool, bool)            // M11c: git branch in status line
+	AuditPath() string                        // audit log file path
+	SaveRecording() error                     // save replay tape
 }
 
 type modelState int

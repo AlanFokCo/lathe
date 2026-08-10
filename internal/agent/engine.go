@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/audit"
 	asevent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/event"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/permission"
@@ -39,6 +40,10 @@ func (e *Engine) runWrap(ctx context.Context, prompt string, ch chan<- asevent.E
 	// so tasks survive the turn boundary (the model can reference earlier ids).
 	if e.taskCtx != nil {
 		ctx = tool.WithTaskContext(ctx, e.taskCtx)
+	}
+	// Audit: inject the audit logger into ctx so tool execution can log.
+	if e.auditLogger != nil {
+		ctx = audit.WithLogger(ctx, e.auditLogger)
 	}
 	// M7f: workspace-root jail. When enabled, tool.WithWorkspaceRoot confines
 	// every file tool (Read/Write/Edit/MultiEdit/ApplyPatch/Glob/Grep) to cwd

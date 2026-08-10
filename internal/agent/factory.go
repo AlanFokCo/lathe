@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -12,15 +14,18 @@ import (
 
 	agentscope "github.com/alanfokco/agentscope-go/v2/pkg/agentscope"
 	asagent "github.com/alanfokco/agentscope-go/v2/pkg/agentscope/agent"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/audit"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/mcp"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/message"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/middleware"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/model"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/permission"
+	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/replay"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/resilience"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/skill"
 	"github.com/alanfokco/agentscope-go/v2/pkg/agentscope/tool"
 	"github.com/alanfokco/lathe/internal/config"
+	"github.com/alanfokco/lathe/internal/pricing"
 	"github.com/alanfokco/lathe/internal/hooks"
 	"github.com/alanfokco/lathe/internal/mcpconfig"
 	"github.com/alanfokco/lathe/internal/session"
@@ -63,6 +68,9 @@ type Engine struct {
 	prePlanMode     permission.PermissionMode // M7g: perm mode to restore on ExitPlanMode
 	subagents       *subagent.Tracker         // M7e: subagent lifecycle recorder for /agents
 	skillsList      []skill.Skill             // M8c: retained for /skills
+	recorder        *replay.Middleware         // replay recording middleware
+	auditLogger     audit.Logger               // structured audit logger
+	auditPath       string                     // file path for the audit log
 	pendingMu       sync.Mutex
 	pending         *pendingApproval // HITL bridge: last RequireUserConfirm
 }
@@ -224,6 +232,31 @@ func NewEngine(ctx context.Context, cfg *config.Config) (*Engine, error) {
 		taskCtx: taskCtx, thinker: thk, efforter: ef,
 		subagents: subTracker, skillsList: skillsList,
 	}
+
+	// Replay: set up recorder or replayer middleware.
+	if cfg.RecordTape != "" {
+		e.recorder = replay.NewRecorder()
+	} else if cfg.ReplayTape != "" {
+		tape, rerr := loadTapeFromFile(cfg.ReplayTape)
+		if rerr != nil {
+			return nil, fmt.Errorf("replay: %w", rerr)
+		}
+		e.recorder = replay.NewReplayer(tape)
+	}
+
+	// Audit: FileLogger writing to ~/.lathe/audit/<session-id>.jsonl.
+	if state.SessionID != "" {
+		auditDir := defaultAuditDir()
+		if auditDir != "" {
+			aPath := filepath.Join(auditDir, state.SessionID+".jsonl")
+			al, aerr := audit.NewFileLogger(aPath)
+			if aerr == nil {
+				e.auditLogger = al
+				e.auditPath = aPath
+			}
+		}
+	}
+
 	e.assembleAgent()
 	return e, nil
 }
@@ -241,15 +274,51 @@ func (e *Engine) assembleAgent() {
 		e.toolkit.AddGroup("task", NewTaskToolWithTracker(e.chatModel, e.permEng, e.maxIters, subTk, e.subagents))
 	}
 
+	// Build middleware chain dynamically. Onion order: index 0 is outermost
+	// (first to enter on request, last to exit on response).
+	//   - CostTracker FIRST (outermost): rejects early before model call.
+	//   - Product middlewares: role fixup + shell hooks.
+	//   - Recorder: captures already-redacted output (sits outside guardrail).
+	//   - Guardrail LAST (innermost): filters response before anything else.
+	mws := make([]middleware.Middleware, 0, 6)
+
+	// Spend cap (CostTrackerMiddleware) — outermost so it rejects before
+	// any inner middleware or the core model call runs.
+	if e.cfg != nil && e.cfg.MaxCostUSD > 0 {
+		prices := buildModelPrices()
+		ctOpts := []middleware.CostTrackerOption{middleware.WithMaxCostUSD(e.cfg.MaxCostUSD)}
+		mws = append(mws, middleware.NewCostTrackerMiddleware(prices, ctOpts...))
+	}
+
+	// Product middlewares.
+	mws = append(mws,
+		&toolResultRoleMiddleware{BaseMiddleware: middleware.BaseMiddleware{MiddlewareKey: "lathe-toolresult-role"}},
+		&shellHookMiddleware{BaseMiddleware: middleware.BaseMiddleware{MiddlewareKey: "lathe-shellhook"}, e: e},
+	)
+
+	// Replay recorder or replayer — between product and guardrail so it
+	// captures the guardrail-redacted output (onion: response flows from
+	// guardrail outward through recorder).
+	if e.recorder != nil {
+		mws = append(mws, e.recorder)
+	}
+
+	// Output guardrails — innermost (last). On response, the guardrail
+	// processes the raw model output first; all outer middlewares
+	// (including the recorder) see the already-filtered result.
+	mws = append(mws, middleware.NewGuardrailMiddleware(
+		middleware.KeywordRedactRule("secret-patterns", "[REDACTED]",
+			"AKIA", "ghp_", "gho_", "ghs_"),
+		secretSkRedactRule(),
+		middleware.MaxLengthRule("max-output-length", 50000, middleware.GuardrailWarn),
+	))
+
 	opts := []asagent.AgentOption{
 		asagent.WithToolkit(e.toolkit),
 		asagent.WithReadCache(e.readCache),
 		asagent.WithContextConfig(toContextConfig(e.compressCfg)),
 		asagent.WithReactConfig(asagent.ReactConfig{MaxIters: e.maxIters}),
-		asagent.WithMiddlewares(
-			&toolResultRoleMiddleware{BaseMiddleware: middleware.BaseMiddleware{MiddlewareKey: "lathe-toolresult-role"}},
-			&shellHookMiddleware{BaseMiddleware: middleware.BaseMiddleware{MiddlewareKey: "lathe-shellhook"}, e: e},
-		),
+		asagent.WithMiddlewares(mws...),
 		asagent.WithState(e.state),
 		asagent.WithLoopHooks(&persistHook{e: e, saved: len(e.state.Context)}),
 	}
@@ -257,6 +326,77 @@ func (e *Engine) assembleAgent() {
 		opts = append(opts, asagent.WithPermissionContext(e.permEng.Context))
 	}
 	e.agent = asagent.NewUnifiedAgent(e.name, e.sysPrompt, e.chatModel, opts...)
+}
+
+// secretSkRedactRule matches "sk-" followed by 20+ alphanumeric/dash/underscore
+// characters, typical of OpenAI/Stripe/generic secret keys.
+func secretSkRedactRule() middleware.GuardrailRule {
+	return middleware.CustomRule("secret-sk-pattern", middleware.GuardrailRedact,
+		func(text string) (bool, string) {
+			// Simple linear scan: look for "sk-" prefix + 20 key chars.
+			idx := 0
+			for {
+				pos := strings.Index(text[idx:], "sk-")
+				if pos < 0 {
+					return false, ""
+				}
+				start := idx + pos + 3
+				count := 0
+				for i := start; i < len(text); i++ {
+					c := text[i]
+					if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+						(c >= '0' && c <= '9') || c == '-' || c == '_' {
+						count++
+					} else {
+						break
+					}
+				}
+				if count >= 20 {
+					return true, "contains secret key pattern (sk-...)"
+				}
+				idx = start
+			}
+		})
+}
+
+// buildModelPrices translates internal/pricing rates into the middleware
+// ModelPrice map expected by CostTrackerMiddleware.
+func buildModelPrices() map[string]middleware.ModelPrice {
+	// pricing.Lookup is prefix-based; enumerate known prefixes directly from
+	// the pricing table. The middleware does exact-match on model name, so we
+	// also map them here for the most common model names.
+	known := []struct {
+		provider string
+		model    string
+	}{
+		{"anthropic", "claude-opus-4"},
+		{"anthropic", "claude-sonnet-4"},
+		{"anthropic", "claude-haiku-4"},
+		{"anthropic", "claude-3-5-sonnet"},
+		{"anthropic", "claude-3-5-haiku"},
+		{"anthropic", "claude-fable-5"},
+		{"openai", "gpt-4o"},
+		{"openai", "gpt-4o-mini"},
+		{"openai", "o1"},
+		{"openai", "o1-mini"},
+		{"dashscope", "qwen-plus"},
+		{"dashscope", "qwen-max"},
+		{"dashscope", "qwen-turbo"},
+	}
+	prices := make(map[string]middleware.ModelPrice, len(known))
+	for _, k := range known {
+		r, ok := pricing.Lookup(k.provider, k.model)
+		if !ok || r.Zero() {
+			continue
+		}
+		prices[k.model] = middleware.ModelPrice{
+			InputPerMillion:  r.InPerMTok,
+			OutputPerMillion: r.OutPerMTok,
+			CacheReadPerM:    r.CacheReadPerMTok,
+			CacheWritePerM:   r.CacheWritePerMTok,
+		}
+	}
+	return prices
 }
 
 // toContextConfig maps lathe's compressConfig to agentscope's ContextConfig
@@ -587,7 +727,60 @@ func (e *Engine) Close() error {
 		_ = e.workspaceCloser()
 	}
 	e.workspaceCloser = nil
+	// Close the audit file logger if present.
+	if fl, ok := e.auditLogger.(*audit.FileLogger); ok && fl != nil {
+		_ = fl.Close()
+	}
+	e.auditLogger = nil
 	return nil
+}
+
+// SaveRecording marshals the recorder's tape to the configured file. Called
+// from the TUI cleanup path.
+func (e *Engine) SaveRecording() error {
+	if e.recorder == nil || e.cfg == nil || e.cfg.RecordTape == "" {
+		return nil
+	}
+	tape := e.recorder.Tape()
+	if tape == nil || len(tape.Entries) == 0 {
+		return nil
+	}
+	data, err := json.MarshalIndent(tape, "", "  ")
+	if err != nil {
+		return fmt.Errorf("save recording: marshal: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(e.cfg.RecordTape), 0o755); err != nil {
+		return fmt.Errorf("save recording: mkdir: %w", err)
+	}
+	return os.WriteFile(e.cfg.RecordTape, data, 0o644)
+}
+
+// AuditPath returns the path to the audit log for this session, or "" if
+// audit logging is not active.
+func (e *Engine) AuditPath() string { return e.auditPath }
+
+// loadTapeFromFile reads and unmarshals a replay tape from a JSON file.
+func loadTapeFromFile(path string) (*replay.Tape, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var tape replay.Tape
+	if err := json.Unmarshal(data, &tape); err != nil {
+		return nil, err
+	}
+	return &tape, nil
+}
+
+// defaultAuditDir returns ~/.lathe/audit, creating it if needed.
+func defaultAuditDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	dir := filepath.Join(home, ".lathe", "audit")
+	_ = os.MkdirAll(dir, 0o755)
+	return dir
 }
 
 // initAgentscope initializes agentscope and dampens its log verbosity. v3
@@ -607,20 +800,20 @@ func buildChatModel(cfg *config.Config) (model.ChatModel, error) {
 	switch cfg.Provider {
 	case "anthropic":
 		cm, err = model.NewAnthropicChatModel(&model.AnthropicConfig{
-			APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model, MaxOutputTokens: 8192,
+			SecretAPIKey: model.NewSecretStr(cfg.APIKey), BaseURL: cfg.BaseURL, Model: cfg.Model, MaxOutputTokens: 8192,
 			PromptCaching: cfg.PromptCaching, // M8a
 		})
 	case "openai":
 		cm, err = model.NewOpenAIChatModel(model.OpenAIConfig{
-			APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model,
+			SecretAPIKey: model.NewSecretStr(cfg.APIKey), BaseURL: cfg.BaseURL, Model: cfg.Model,
 		})
 	case "dashscope":
 		cm, err = model.NewDashScopeChatModel(model.DashScopeConfig{
-			APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model,
+			SecretAPIKey: model.NewSecretStr(cfg.APIKey), BaseURL: cfg.BaseURL, Model: cfg.Model,
 		})
 	case "ollama":
 		cm, err = model.NewOpenAIChatModel(model.OpenAIConfig{
-			APIKey:  cfg.APIKey,
+			SecretAPIKey: model.NewSecretStr(cfg.APIKey),
 			BaseURL: cfg.BaseURL,
 			Model:   cfg.Model,
 		})

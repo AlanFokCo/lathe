@@ -120,6 +120,8 @@ func (f *fakeControl) AgentscopeVersion() string                { return f.agent
 func (f *fakeControl) GitInfo() (string, bool, bool) {
 	return f.gitBranch, f.gitDirty, f.gitBranch != ""
 }
+func (f *fakeControl) AuditPath() string       { return "" }
+func (f *fakeControl) SaveRecording() error    { return nil }
 
 func testCfg() *config.Config { return &config.Config{Permission: "accept_edits"} }
 

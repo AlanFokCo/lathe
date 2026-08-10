@@ -56,6 +56,7 @@ func commands() []command {
 		{name: "sandbox", desc: "report sandbox mode + workspace-root jail status", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.sandboxText()); return nil }},
 		{name: "skills", desc: "list discovered skills", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.skillsText()); return nil }},
 		{name: "hooks", desc: "list configured settings.json hooks", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.hooksText()); return nil }},
+		{name: "audit", desc: "show last 20 audit log entries", run: func(m *model, _ string) tea.Cmd { m.sbAppendUser(m.auditText()); return nil }},
 		{name: "quit", desc: "exit lathe", run: func(m *model, _ string) tea.Cmd { return tea.Quit }},
 	}
 }

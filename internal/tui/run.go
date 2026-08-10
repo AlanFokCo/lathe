@@ -18,6 +18,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	defer eng.Close()
+	defer func() { _ = eng.SaveRecording() }()
 	eng.SetInteractive(true)
 
 	// M13b: silence logrus in alt-screen mode so error lines do not leak

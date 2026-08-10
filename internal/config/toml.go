@@ -29,6 +29,7 @@ type TOMLFile struct {
 	PromptCaching  bool    `toml:"prompt_caching"`
 	CompactRatio   float64 `toml:"compact_ratio"`
 	ContextSize    int     `toml:"context_size"`
+	MaxCostUSD     float64 `toml:"max_cost_usd"`
 	// Loaded reports whether the file was found and parsed (informational for
 	// /doctor). Not serialized.
 	Loaded bool `toml:"-"`
@@ -122,6 +123,9 @@ func mergeTOMLIntoFlags(f Flags, t TOMLFile) Flags {
 	}
 	if f.ContextSize == 0 {
 		f.ContextSize = t.ContextSize
+	}
+	if f.MaxCostUSD == 0 {
+		f.MaxCostUSD = t.MaxCostUSD
 	}
 	return f
 }

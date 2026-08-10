@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -388,4 +390,60 @@ func (m *model) handleInit() tea.Cmd {
 	}
 	m.sbAppendUser("/init: wrote " + path)
 	return nil
+}
+
+// auditText reads the last 20 entries from the audit JSONL file and renders
+// them for /audit. Each entry is shown as a one-line summary.
+func (m *model) auditText() string {
+	path := m.engine.AuditPath()
+	if path == "" {
+		return "/audit: no audit log active"
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "/audit: " + err.Error()
+	}
+	defer func() { _ = f.Close() }()
+
+	// Read all lines, keep last 20.
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 256*1024), 256*1024)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	if len(lines) == 0 {
+		return "/audit: log is empty"
+	}
+	start := 0
+	if len(lines) > 20 {
+		start = len(lines) - 20
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("/audit: last %d of %d entries (%s)\n", len(lines)-start, len(lines), path))
+	for _, line := range lines[start:] {
+		// Parse minimal fields for display.
+		var entry struct {
+			Action   string `json:"action"`
+			ToolName string `json:"tool_name,omitempty"`
+			Decision string `json:"decision,omitempty"`
+			Error    string `json:"error,omitempty"`
+		}
+		if jerr := json.Unmarshal([]byte(line), &entry); jerr != nil {
+			b.WriteString("  (parse error)\n")
+			continue
+		}
+		summary := "  " + entry.Action
+		if entry.ToolName != "" {
+			summary += " " + entry.ToolName
+		}
+		if entry.Decision != "" {
+			summary += " [" + entry.Decision + "]"
+		}
+		if entry.Error != "" {
+			summary += " err=" + entry.Error
+		}
+		b.WriteString(summary + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }

@@ -26,6 +26,8 @@ func newRootCmd() *cobra.Command {
 	var compactRatio float64
 	var contextSize int
 	var notify bool
+	var maxCost float64
+	var recordTape, replayTape string
 
 	root := &cobra.Command{
 		Use:     "lathe",
@@ -52,6 +54,9 @@ func newRootCmd() *cobra.Command {
 	root.Flags().Float64Var(&compactRatio, "compact-ratio", 0, "auto-compact when conversation hits this fraction of context (0=default 0.8, M9d)")
 	root.Flags().IntVar(&contextSize, "context-size", 0, "override model context window in tokens (0=model card default, M9d)")
 	root.Flags().BoolVar(&notify, "notify", false, "OSC-9 notification + bell on turn end (M10f)")
+	root.Flags().Float64Var(&maxCost, "max-cost", 0, "spend cap in USD (0=unlimited)")
+	root.Flags().StringVar(&recordTape, "record", "", "path to record a replay tape")
+	root.Flags().StringVar(&replayTape, "replay", "", "path to replay from a tape")
 
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load(config.Flags{
@@ -61,6 +66,7 @@ func newRootCmd() *cobra.Command {
 			Thinking: thinking, ThinkingBudget: thinkingBudget, Effort: effort,
 			Jail: jail, PromptCaching: promptCaching,
 			CompactRatio: compactRatio, ContextSize: contextSize, Notify: notify,
+			MaxCostUSD: maxCost, RecordTape: recordTape, ReplayTape: replayTape,
 		})
 		if err != nil {
 			return err
