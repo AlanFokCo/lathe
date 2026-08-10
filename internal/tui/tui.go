@@ -22,6 +22,7 @@ import (
 	"github.com/alanfokco/lathe/internal/statusline"
 	"github.com/alanfokco/lathe/internal/subagent"
 	"github.com/alanfokco/lathe/internal/tui/theme"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -121,6 +122,9 @@ type model struct {
 	pickerCursor   int
 	vimNormal      bool // M10i: true = normal mode, false = insert mode
 	vimPending     rune // M10i: first key of a multi-key command (e.g. 'd' for dd)
+	toast          string    // M14: turn completion toast message
+	toastExpiry    time.Time // M14: when to clear the toast
+	turnToolCount  int       // M14: tool calls this turn
 }
 
 func newModel(engine EngineControl, cfg *config.Config) *model {
@@ -154,23 +158,34 @@ func (m *model) Init() tea.Cmd {
 	return tea.Batch(m.input.Focus(), m.scheduleStatusLine())
 }
 
-// showWelcome renders the startup banner into the scrollback (M13).
+// showWelcome renders the startup banner into the scrollback (M14 upgraded).
 func (m *model) showWelcome() {
-	var b strings.Builder
-	b.WriteString(promptStyle.Render("█ lathe") + dimStyle.Render(" v0.1") + "\n")
-	b.WriteString(dimStyle.Render("  model: ") + m.engine.ModelName() + "\n")
+	var inner strings.Builder
+	inner.WriteString(selectedToolStyle.Render("  ◈ lathe") + dimStyle.Render(" v0.1") + "\n")
+	inner.WriteString(dimStyle.Render("  ├─ model: ") + promptStyle.Render(m.engine.ModelName()) + "\n")
 	if m.cwd != "" {
-		b.WriteString(dimStyle.Render("  cwd:   ") + m.cwd + "\n")
+		inner.WriteString(dimStyle.Render("  ├─ cwd:   ") + m.cwd + "\n")
 	}
 	if branch, dirty, ok := m.engine.GitInfo(); ok {
 		label := branch
 		if dirty {
 			label += "*"
 		}
-		b.WriteString(dimStyle.Render("  git:   ") + label + "\n")
+		inner.WriteString(dimStyle.Render("  ├─ git:   ") + label + "\n")
 	}
-	b.WriteString(dimStyle.Render("\n  Tips: type a message, or /help for commands.\n"))
-	m.sb.appendBanner(b.String())
+	perm := m.engine.PermissionMode()
+	if perm == "" {
+		perm = "default"
+	}
+	inner.WriteString(dimStyle.Render("  └─ mode:  ") + perm + "\n")
+	inner.WriteString(dimStyle.Render("\n  Tips: type a message, or /help for commands.\n"))
+	// Render as a bordered card
+	card := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(curTheme.Accent).
+		Padding(0, 1).
+		Render(inner.String())
+	m.sb.appendBanner(card + "\n")
 	m.rebuild()
 }
 
@@ -185,6 +200,7 @@ func (m *model) submit(prompt string) tea.Cmd {
 	m.ctx, m.cancel = ctx, cancel
 	m.state = stateRunning
 	m.turnOut = 0            // M6c: reset per-turn output tokens for tok/s
+	m.turnToolCount = 0      // M14: reset tool count for toast
 	m.turnStart = time.Now() // M6c: for elapsed + tok/s in the activity line
 	m.eventCh = m.engine.Run(ctx, expanded)
 	return tea.Batch(waitForEvent(m.eventCh), m.spinner.Tick, scheduleFormatTick())
@@ -343,6 +359,13 @@ type formatTickMsg struct{}
 
 func scheduleFormatTick() tea.Cmd {
 	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return formatTickMsg{} })
+}
+
+// toastClearMsg clears the completion toast after its expiry (M14).
+type toastClearMsg struct{}
+
+func scheduleToastClear() tea.Cmd {
+	return tea.Tick(3*time.Second, func(time.Time) tea.Msg { return toastClearMsg{} })
 }
 
 func waitForEvent(ch <-chan asevent.Event) tea.Cmd {
@@ -632,7 +655,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if _, end := msg.ev.(asevent.ReplyEndEvent); end {
 			m.state = stateIdle
 			m.cancel = nil
-			return m, m.scheduleStatusLine()
+			m.showTurnToast()
+			return m, tea.Batch(m.scheduleStatusLine(), scheduleToastClear())
 		}
 		return m, waitForEvent(m.eventCh)
 	case streamEndMsg:
@@ -661,6 +685,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, scheduleFormatTick()
 		}
+		return m, nil
+	case toastClearMsg:
+		m.toast = ""
 		return m, nil
 	case spinner.TickMsg:
 		if m.state == stateRunning || m.state == stateAwaitingApproval {
@@ -707,6 +734,7 @@ func (m *model) handleEvent(ev asevent.Event) {
 		m.sb.appendTool(e.ToolCallID, e.ToolCallName, e.ToolCallInput)
 		m.phase = phaseRunning
 		m.curTool = e.ToolCallName
+		m.turnToolCount++ // M14: count tools for turn toast
 		// M6h: remember the tool name by call id so ToolResultEnd can decide
 		// whether to feed the accumulated payload into the todo tracker.
 		if strings.HasPrefix(e.ToolCallName, "task_") {
@@ -868,19 +896,19 @@ func (m *model) statusLine() string {
 		}
 		return m.statusLineText
 	}
-	parts := []string{m.engine.ModelName()}
+	parts := []string{"◈ " + m.engine.ModelName()}
 	if branch, dirty, ok := m.engine.GitInfo(); ok {
 		label := branch
 		if dirty {
 			label += "*"
 		}
-		parts = append(parts, label)
+		parts = append(parts, "⎇ "+label)
 	}
 	if m.cwd != "" {
-		parts = append(parts, m.cwd)
+		parts = append(parts, "⌂ "+m.cwd)
 	}
-	parts = append(parts, fmt.Sprintf("in=%d out=%d", m.cumIn, m.cumOut))
-	if cb := contextBar(m.lastIn, m.ctxSize); cb != "" { // M6c: context-window usage
+	parts = append(parts, fmt.Sprintf("↑%s ↓%s", humanTokens(m.cumIn), humanTokens(m.cumOut)))
+	if cb := contextBarVisual(m.lastIn, m.ctxSize); cb != "" { // M14: visual context bar
 		parts = append(parts, cb)
 	}
 	if est := m.dollarEstimate(); est != "" { // M9b: running dollar spend
@@ -906,26 +934,30 @@ func (m *model) statusLine() string {
 	return line
 }
 
-// activityLine returns the live progress line shown while a turn runs:
-// "⠋ thinking" or "⠋ running <tool>". Empty when idle. (M6a Commit B: dropped
-// the step N/max display — agentscope has no TurnStep/iter event.)
+// activityLine returns the live progress line shown while a turn runs (M14
+// enhanced): shows phase + elapsed + tok/s, or the toast if one is active.
 func (m *model) activityLine() string {
+	// M14: show toast when active (overrides normal activity)
+	if m.toast != "" && time.Now().Before(m.toastExpiry) {
+		return m.toast
+	}
 	if m.state != stateRunning {
 		return ""
 	}
-	label := "thinking"
-	if m.phase == phaseRunning {
-		label = "running " + m.curTool
+	var parts []string
+	if m.phase == phaseRunning && m.curTool != "" {
+		parts = append(parts, "running "+toolStyle.Render(m.curTool))
+	} else {
+		parts = append(parts, "thinking")
 	}
-	out := m.spinner.View() + " " + label
-	if !m.turnStart.IsZero() { // M6c: elapsed + throughput
+	if !m.turnStart.IsZero() {
 		d := time.Since(m.turnStart)
-		out += " · " + formatElapsed(d)
+		parts = append(parts, dimStyle.Render(formatElapsed(d)))
 		if tps := tokPerSec(m.turnOut, d); tps > 0 {
-			out += fmt.Sprintf(" · %d tok/s", tps)
+			parts = append(parts, fmt.Sprintf("%d tok/s", tps))
 		}
 	}
-	return out
+	return m.spinner.View() + " " + strings.Join(parts, " · ")
 }
 
 // maybeSlash dispatches a "/cmd rest" input via the command registry (M6c).
@@ -1143,17 +1175,26 @@ func (m *model) searchHighlight() string {
 }
 
 // approvalBar renders the tool-approval prompt line with formatted args (M10d).
+// M14: full-width amber bar + styled key badges.
 func (m *model) approvalBar() string {
 	var b strings.Builder
-	b.WriteString(warnStyle.Render("─── Approve "))
+	w := m.wrapWidth()
+	// top amber bar
+	b.WriteString(warnStyle.Render(strings.Repeat("─", w)) + "\n")
+	b.WriteString(warnStyle.Render("  ⚠ Approve "))
 	b.WriteString(selectedToolStyle.Render(m.pendingTool))
-	b.WriteString(warnStyle.Render("? "))
-	b.WriteString("[y]es / [n]o / [a]lways  (ESC=deny)")
+	b.WriteString(warnStyle.Render("?") + "\n")
+	// key badges
+	b.WriteString("  ")
+	b.WriteString(successStyle.Render("[Y]") + "es  ")
+	b.WriteString(errorStyle.Render("[N]") + "o  ")
+	b.WriteString(warnStyle.Render("[A]") + "lways  ")
+	b.WriteString(dimStyle.Render("[Esc]") + "Deny")
 	if m.pendingInput != "" {
-		preview := formatToolInput(m.pendingInput, m.width-4)
-		b.WriteString("\n")
-		b.WriteString(dimStyle.Render(preview))
+		preview := formatToolInput(m.pendingInput, w-4)
+		b.WriteString("\n" + dimStyle.Render("  "+preview))
 	}
+	b.WriteString("\n" + warnStyle.Render(strings.Repeat("─", w)))
 	return b.String()
 }
 
@@ -1242,4 +1283,41 @@ func setTitle(title string) {
 // titleOSC returns the raw OSC-0 title-set sequence (M11d, testable).
 func titleOSC(title string) string {
 	return fmt.Sprintf("\x1b]0;%s\x07", title)
+}
+
+
+// showTurnToast sets the completion toast message after a turn ends (M14).
+func (m *model) showTurnToast() {
+	var parts []string
+	parts = append(parts, successStyle.Render("✓ done"))
+	if m.turnToolCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d tools", m.turnToolCount))
+	}
+	if m.turnOut > 0 {
+		parts = append(parts, humanTokens(m.turnOut)+" tok")
+	}
+	if !m.turnStart.IsZero() {
+		parts = append(parts, formatElapsed(time.Since(m.turnStart)))
+	}
+	if est := m.dollarEstimate(); est != "" {
+		parts = append(parts, strings.TrimPrefix(est, "cost: "))
+	}
+	m.toast = strings.Join(parts, dimStyle.Render(" · "))
+	m.toastExpiry = time.Now().Add(3 * time.Second)
+}
+
+// contextBarVisual renders a mini block-char context bar: ctx [████░░] 67% (M14).
+func contextBarVisual(used, size int) string {
+	if size <= 0 {
+		return ""
+	}
+	pct := used * 100 / size
+	if pct > 100 {
+		pct = 100
+	}
+	const barLen = 6
+	filled := pct * barLen / 100
+	empty := barLen - filled
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
+	return fmt.Sprintf("ctx [%s] %d%%", bar, pct)
 }

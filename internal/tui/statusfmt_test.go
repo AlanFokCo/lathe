@@ -49,7 +49,7 @@ func TestContextBar(t *testing.T) {
 func TestStatusLineShowsContextBar(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o", ctxSize: 128000}, testCfg())
 	m.lastIn = 32000
-	if got := m.statusLine(); !strings.Contains(got, "ctx 25%") {
+	if got := m.statusLine(); !strings.Contains(got, "ctx") || !strings.Contains(got, "25%") {
 		t.Fatalf("status line missing context bar:\n%s", got)
 	}
 }

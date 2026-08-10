@@ -197,7 +197,7 @@ func TestModelCostAccumulation(t *testing.T) {
 	if m.cumIn != 13 || m.cumOut != 7 {
 		t.Fatalf("cum: in=%d out=%d", m.cumIn, m.cumOut)
 	}
-	if !strings.Contains(m.View(), "in=13 out=7") {
+	if !strings.Contains(m.View(), "↑13") || !strings.Contains(m.View(), "↓7") {
 		t.Fatalf("status line missing cum tokens:\n%s", m.View())
 	}
 }
@@ -299,7 +299,7 @@ func TestModelRequireApprovalShowsModal(t *testing.T) {
 		t.Fatalf("state: %v", m.state)
 	}
 	got := m.View()
-	if !strings.Contains(got, "Bash") || !strings.Contains(got, "[y]") || !strings.Contains(got, "[n]") || !strings.Contains(got, "[a]") {
+	if !strings.Contains(got, "Bash") || !strings.Contains(got, "[Y]") || !strings.Contains(got, "[N]") || !strings.Contains(got, "[A]") {
 		t.Fatalf("modal missing content:\n%s", got)
 	}
 }
@@ -341,7 +341,7 @@ func TestStatusLineFallback(t *testing.T) {
 	m := newModel(&fakeControl{model: "gpt-4o"}, testCfg())
 	m.handleEvent(usage(7, 3))
 	got := m.View()
-	if !strings.Contains(got, "gpt-4o") || !strings.Contains(got, "in=7 out=3") {
+	if !strings.Contains(got, "gpt-4o") || !strings.Contains(got, "↑7") || !strings.Contains(got, "↓3") {
 		t.Fatalf("fallback status missing:\n%s", got)
 	}
 	if strings.Contains(got, "model=") {
@@ -783,7 +783,7 @@ func TestApprovalBar(t *testing.T) {
 	if !strings.Contains(bar, "ls -la") {
 		t.Fatal("approval bar should preview args")
 	}
-	if !strings.Contains(bar, "[y]es") {
+	if !strings.Contains(bar, "[Y]") {
 		t.Fatal("approval bar should show key hints")
 	}
 }

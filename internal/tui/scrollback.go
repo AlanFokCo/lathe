@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/alanfokco/lathe/internal/tui/theme"
 	"github.com/charmbracelet/lipgloss"
@@ -38,9 +39,11 @@ type block struct {
 	toolOut   string
 	toolState string
 	diff      string
-	summary   string // one-line summary, cached at finishTool (M5d)
-	expanded  bool   // M5d: inline full output when true
-	startLine int    // M5d: line offset in built content (selection scroll)
+	summary   string        // one-line summary, cached at finishTool (M5d)
+	expanded  bool          // M5d: inline full output when true
+	startLine int           // M5d: line offset in built content (selection scroll)
+	toolDur   time.Duration // M14: tool execution duration
+	toolStart time.Time     // M14: tool start timestamp
 }
 
 type scrollback struct {
@@ -93,7 +96,7 @@ func (s *scrollback) finishAssistant() {
 }
 
 func (s *scrollback) appendTool(id, name, input string) {
-	s.blocks = append(s.blocks, block{kind: kindTool, toolID: id, toolName: name, toolIn: input})
+	s.blocks = append(s.blocks, block{kind: kindTool, toolID: id, toolName: name, toolIn: input, toolStart: time.Now()})
 	s.lastAssistant = -1
 }
 
@@ -117,6 +120,9 @@ func (s *scrollback) finishTool(id, state, diff string) {
 			b.toolState = state
 			b.diff = diff
 			b.summary = summarize(b.toolName, b.toolOut, state, diff)
+			if !b.toolStart.IsZero() {
+				b.toolDur = time.Since(b.toolStart)
+			}
 			b.done = true
 			return
 		}
@@ -160,6 +166,8 @@ var (
 	thinkingStyle     lipgloss.Style // M7a
 	okStyle           lipgloss.Style // M10c: permission mode "accept_edits"
 	dimStyle          lipgloss.Style // M10c: permission mode "default"/"dont_ask"
+	turnSepStyle      lipgloss.Style // M14: turn separator
+	userGutterStyle   lipgloss.Style // M14: user message left border
 )
 
 func init() { applyTheme(curTheme) }
@@ -177,6 +185,8 @@ func applyTheme(th theme.Theme) {
 	thinkingStyle = lipgloss.NewStyle().Faint(true).Italic(true).Foreground(th.Tool) // M7a
 	okStyle = lipgloss.NewStyle().Foreground(th.Success)                             // M10c
 	dimStyle = lipgloss.NewStyle().Faint(true)                                       // M10c
+	turnSepStyle = lipgloss.NewStyle().Faint(true).Foreground(th.Muted)              // M14
+	userGutterStyle = lipgloss.NewStyle().Foreground(th.User)                        // M14
 }
 
 // build produces the full scrollback content string at width (M5d). Replaces
@@ -186,13 +196,20 @@ func applyTheme(th theme.Theme) {
 func (s *scrollback) build(width, selectedTool int) string {
 	var b strings.Builder
 	line := 0
+	turnNum := 0
 	for i := range s.blocks {
 		bl := &s.blocks[i]
 		bl.startLine = line
 		var body string
 		switch bl.kind {
 		case kindUser:
-			body = userStyle.Render("> ") + bl.text + "\n"
+			turnNum++
+			if turnNum > 1 {
+				sep := turnSeparator(turnNum-1, width)
+				b.WriteString(sep)
+				line += strings.Count(sep, "\n")
+			}
+			body = renderUserBlock(bl.text, width)
 		case kindAssistant:
 			body = s.buildAssistant(bl, width)
 		case kindTool:
@@ -244,6 +261,7 @@ func (s *scrollback) buildAssistant(bl *block, width int) string {
 
 // buildTool renders a tool block collapsed (summary line) or expanded (full
 // output + diff inlined). M5d. selected highlights the bullet (Task 5 wiring).
+// M14: adds timing to collapsed line + top/bottom borders for expanded.
 func (s *scrollback) buildTool(bl *block, width int, selected bool) string {
 	var b strings.Builder
 	args := toolHeaderArg(bl.toolName, bl.toolIn)
@@ -262,11 +280,21 @@ func (s *scrollback) buildTool(bl *block, width int, selected bool) string {
 	if ds := diffStat(bl.diff); ds != "" {
 		b.WriteString(" " + ds)
 	}
+	if bl.toolDur > 0 {
+		b.WriteString(" " + dimStyle.Render(formatToolDur(bl.toolDur)))
+	}
 	if !bl.expanded {
 		b.WriteString("\n")
 		return b.String()
 	}
 	b.WriteString("   (e to collapse)\n")
+	// M14: expanded top border
+	header := "┌─ " + bl.toolName + "(" + args + ") "
+	rem := width - len([]rune(header)) - 2
+	if rem < 4 {
+		rem = 4
+	}
+	b.WriteString(dimStyle.Render(header+strings.Repeat("─", rem)) + "\n")
 	if bl.diff != "" {
 		b.WriteString(indentBlock(renderDiff(bl.diff, width-2, curTheme), "  ") + "\n")
 	}
@@ -279,6 +307,8 @@ func (s *scrollback) buildTool(bl *block, width int, selected bool) string {
 		out = paginateOutput(out)
 		b.WriteString(indentBlock(wrapRaw(out, width-2), "  ") + "\n")
 	}
+	// M14: expanded bottom border
+	b.WriteString(dimStyle.Render("└"+strings.Repeat("─", width-2)) + "\n")
 	return b.String()
 }
 
@@ -364,4 +394,39 @@ func stateMark(state string) string {
 	default:
 		return "[" + state + "]"
 	}
+}
+
+
+// turnSeparator renders a centered "── turn N ──" divider (M14).
+func turnSeparator(n, width int) string {
+	label := fmt.Sprintf(" turn %d ", n)
+	side := (width - len(label)) / 2
+	if side < 2 {
+		side = 2
+	}
+	line := strings.Repeat("─", side) + label + strings.Repeat("─", side)
+	return "\n" + turnSepStyle.Render(line) + "\n"
+}
+
+// renderUserBlock renders a user message with a colored left-border gutter (M14).
+func renderUserBlock(text string, width int) string {
+	bar := userGutterStyle.Render("│")
+	lines := strings.Split(text, "\n")
+	var b strings.Builder
+	for i, ln := range lines {
+		prefix := "  "
+		if i == 0 {
+			prefix = "> "
+		}
+		b.WriteString(bar + " " + userStyle.Render(prefix) + ln + "\n")
+	}
+	return b.String()
+}
+
+// formatToolDur renders a tool duration compactly (M14).
+func formatToolDur(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
 }
